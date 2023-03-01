@@ -1,3 +1,7 @@
+import { StreamProvider } from '@metamask/providers';
+
+import { log } from '../logging';
+
 /**
  * Takes an error that was thrown, determines if it is
  * an error object. If it is then it will return that. Otherwise,
@@ -39,7 +43,7 @@ export async function withTeardown<T>(
         if (teardownRef.lastTeardown === myTeardown) {
           resolve(value);
         } else {
-          console.warn(
+          log(
             'Late promise received after Snap finished execution. Promise will be dropped.',
           );
         }
@@ -48,10 +52,48 @@ export async function withTeardown<T>(
         if (teardownRef.lastTeardown === myTeardown) {
           reject(reason);
         } else {
-          console.warn(
+          log(
             'Late promise received after Snap finished execution. Promise will be dropped.',
           );
         }
       });
   });
+}
+
+/**
+ * Returns a Proxy that narrows down (attenuates) the fields available on
+ * the StreamProvider and replaces the request implementation.
+ *
+ * @param provider - Instance of a StreamProvider to be limited.
+ * @param request - Custom attenuated request object.
+ * @returns Proxy to the StreamProvider instance.
+ */
+export function proxyStreamProvider(
+  provider: StreamProvider,
+  request: unknown,
+): StreamProvider {
+  // Proxy target is intentionally set to be an empty object, to ensure
+  // that access to the prototype chain is not possible.
+  const proxy = new Proxy(
+    {},
+    {
+      has(_target: object, prop: string | symbol) {
+        return (
+          typeof prop === 'string' &&
+          ['request', 'on', 'removeListener'].includes(prop)
+        );
+      },
+      get(_target, prop: keyof StreamProvider) {
+        if (prop === 'request') {
+          return request;
+        } else if (['on', 'removeListener'].includes(prop)) {
+          return provider[prop];
+        }
+
+        return undefined;
+      },
+    },
+  );
+
+  return proxy as StreamProvider;
 }

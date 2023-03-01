@@ -6,6 +6,8 @@ import path from 'path';
 
 import { NpmLocation } from './npm';
 
+fetchMock.enableMocks();
+
 describe('NpmLocation', () => {
   beforeEach(() => {
     fetchMock.resetMocks();
@@ -41,6 +43,8 @@ describe('NpmLocation', () => {
         (_req) =>
           Promise.resolve({
             ok: true,
+            // eslint-disable-next-line @typescript-eslint/naming-convention
+            headers: new Headers({ 'content-length': '5477' }),
             body: createReadStream(
               path.resolve(
                 __dirname,
@@ -95,6 +99,17 @@ describe('NpmLocation', () => {
 
     expect(svgIcon?.startsWith('<svg') && svgIcon.endsWith('</svg>')).toBe(
       true,
+    );
+  });
+
+  it('throws if fetch fails', async () => {
+    fetchMock.mockResponse(async () => ({ status: 404, body: 'Not found' }));
+    const location = new NpmLocation(new URL('npm:@metamask/template-snap'));
+    await expect(location.manifest()).rejects.toThrow(
+      'Failed to fetch NPM registry entry. Status code: 404.',
+    );
+    await expect(location.fetch('foo')).rejects.toThrow(
+      'Failed to fetch NPM registry entry. Status code: 404.',
     );
   });
 

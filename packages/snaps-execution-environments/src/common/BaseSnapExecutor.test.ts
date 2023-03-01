@@ -1,216 +1,14 @@
 // eslint-disable-next-line import/no-unassigned-import
 import 'ses';
 import { HandlerType } from '@metamask/snaps-utils';
-import {
-  assertIsJsonRpcSuccess,
-  Json,
-  JsonRpcRequest,
-  JsonRpcResponse,
-} from '@metamask/utils';
-import { Duplex, DuplexOptions, EventEmitter, Readable } from 'stream';
+import { EventEmitter } from 'stream';
 
-import { BaseSnapExecutor } from './BaseSnapExecutor';
+import * as logging from '../logging';
+import { TestSnapExecutor } from './test-utils/executor';
 
 const FAKE_ORIGIN = 'origin:foo';
 const FAKE_SNAP_NAME = 'local:foo';
 const ON_RPC_REQUEST = HandlerType.OnRpcRequest;
-
-type TwoWayPassThroughBuffer = {
-  buffer: { chunk: any; encoding: BufferEncoding }[];
-  canPush: boolean;
-};
-
-class TwoWayPassThrough {
-  static #flush(bufferData: TwoWayPassThroughBuffer, stream: Readable) {
-    while (bufferData.canPush && bufferData.buffer.length > 0) {
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-      const { chunk: data, encoding: enc } = bufferData.buffer.shift()!;
-      bufferData.canPush = stream.push(data, enc);
-    }
-  }
-
-  readonly left: Duplex;
-
-  readonly right: Duplex;
-
-  #leftToRight: TwoWayPassThroughBuffer = {
-    buffer: [],
-    canPush: false,
-  };
-
-  #rightToLeft: TwoWayPassThroughBuffer = {
-    buffer: [],
-    canPush: false,
-  };
-
-  constructor(opts?: DuplexOptions) {
-    this.left = new Duplex({
-      ...opts,
-      write: (chunk, encoding, callback) => {
-        this.#leftToRight.buffer.push({ chunk, encoding });
-        TwoWayPassThrough.#flush(this.#leftToRight, this.right);
-        return callback();
-      },
-      read: () => {
-        this.#rightToLeft.canPush = true;
-        TwoWayPassThrough.#flush(this.#rightToLeft, this.left);
-      },
-    });
-
-    this.right = new Duplex({
-      ...opts,
-      write: (chunk, encoding, callback) => {
-        this.#rightToLeft.buffer.push({ chunk, encoding });
-        TwoWayPassThrough.#flush(this.#rightToLeft, this.left);
-        return callback();
-      },
-      read: () => {
-        this.#leftToRight.canPush = true;
-        TwoWayPassThrough.#flush(this.#leftToRight, this.right);
-      },
-    });
-  }
-}
-
-class TestSnapExecutor extends BaseSnapExecutor {
-  readonly #commandLeft: Duplex;
-
-  readonly #rpcLeft: Duplex;
-
-  readonly #commandBuffer: any[] = [];
-
-  readonly #rpcBuffer: any[] = [];
-
-  readonly #commandListeners: ((chunk: any) => void)[] = [];
-
-  readonly #rpcListeners: ((chunk: any) => void)[] = [];
-
-  constructor() {
-    const rpc = new TwoWayPassThrough({
-      objectMode: true,
-      allowHalfOpen: false,
-    });
-    const command = new TwoWayPassThrough({
-      objectMode: true,
-      allowHalfOpen: false,
-    });
-
-    super(command.right, rpc.right);
-
-    this.#commandLeft = command.left;
-    this.#rpcLeft = rpc.left;
-
-    this.#commandLeft.on('data', (chunk) => {
-      this.#commandBuffer.push(chunk);
-      TestSnapExecutor.#flushReads(this.#commandBuffer, this.#commandListeners);
-    });
-
-    this.#rpcLeft.on('data', (chunk) => {
-      this.#rpcBuffer.push(chunk);
-      TestSnapExecutor.#flushReads(this.#rpcBuffer, this.#rpcListeners);
-    });
-  }
-
-  // Utility function for executing snaps
-  public async executeSnap(
-    id: number,
-    name: string,
-    code: string,
-    endowments: string[],
-  ) {
-    const providerRequestPromise = this.readRpc();
-    await this.writeCommand({
-      jsonrpc: '2.0',
-      id,
-      method: 'executeSnap',
-      params: [name, code, endowments],
-    });
-
-    // In case we are running fake timers, execute a tiny step that forces
-    // `setTimeout` to execute, is required for stream communication.
-    if ('clock' in setTimeout) {
-      jest.advanceTimersByTime(1);
-    }
-
-    const providerRequest = await providerRequestPromise;
-    await this.writeRpc({
-      name: 'metamask-provider',
-      data: {
-        jsonrpc: '2.0',
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        id: providerRequest.data.id!,
-        result: {
-          isUnlocked: false,
-          accounts: [],
-          chainId: '0x1',
-          networkVersion: '1',
-        },
-      },
-    });
-
-    if ('clock' in setTimeout) {
-      jest.advanceTimersByTime(1);
-    }
-  }
-
-  public async writeCommand(message: JsonRpcRequest): Promise<void> {
-    return new Promise((resolve, reject) =>
-      this.#commandLeft.write(message, (error) => {
-        if (error) {
-          return reject(error);
-        }
-        return resolve();
-      }),
-    );
-  }
-
-  public async readCommand(): Promise<JsonRpcRequest> {
-    const promise = new Promise<JsonRpcRequest>((resolve) =>
-      this.#commandListeners.push(resolve),
-    );
-
-    TestSnapExecutor.#flushReads(this.#commandBuffer, this.#commandListeners);
-
-    return promise;
-  }
-
-  static #flushReads(readBuffer: any[], listeners: ((chunk: any) => void)[]) {
-    while (readBuffer.length && listeners.length) {
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-      const chunk = readBuffer.shift()!;
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-      listeners.shift()!(chunk);
-    }
-  }
-
-  public async writeRpc(message: {
-    name: string;
-    data: JsonRpcResponse<Json>;
-  }): Promise<void> {
-    return new Promise((resolve, reject) =>
-      this.#rpcLeft.write(message, (error) => {
-        if (error) {
-          return reject(error);
-        }
-        return resolve();
-      }),
-    );
-  }
-
-  public async readRpc(): Promise<{
-    name: string;
-    data: JsonRpcRequest;
-  }> {
-    const promise = new Promise<{
-      name: string;
-      data: JsonRpcRequest;
-    }>((resolve) => this.#rpcListeners.push(resolve));
-
-    TestSnapExecutor.#flushReads(this.#rpcBuffer, this.#rpcListeners);
-
-    return promise;
-  }
-}
 
 describe('BaseSnapExecutor', () => {
   describe('timers', () => {
@@ -302,122 +100,6 @@ describe('BaseSnapExecutor', () => {
 
       expect(consoleErrorSpy).not.toHaveBeenCalled();
     });
-
-    it.each(['Timeout', 'Interval'])(
-      "can't clear set%s of other snaps",
-      async (name: string) => {
-        // Since we don't know how the handle looks like we have to actually retrieve it after creating it
-        const CODE_1 = `
-          let handle;
-          exports.onRpcRequest = (({ origin, request }) => {
-            switch (request.method) {
-              case 'set':
-                let resolve;
-                const promise = new Promise((r) => { resolve = r; });
-                handle = set${name}(() => {
-                  clear${name}(handle);
-                  resolve('SNAP 1 OK');
-                }, 1000);
-                return promise;
-              case 'getHandle':
-                return handle;
-            }
-          });
-        `;
-        const CODE_2 = `
-          exports.onRpcRequest = (({ origin, request }) => {
-            const handle = request.params[0];
-            clear${name}(handle);
-            return 'SNAP 2 OK';
-          })
-        `;
-        const SNAP_NAME_1 = `${FAKE_SNAP_NAME}_1`;
-        const SNAP_NAME_2 = `${FAKE_SNAP_NAME}_2`;
-
-        const executor = new TestSnapExecutor();
-
-        // Initiate the snaps
-        await executor.executeSnap(1, SNAP_NAME_1, CODE_1, TIMER_ENDOWMENTS);
-
-        expect(await executor.readCommand()).toStrictEqual({
-          jsonrpc: '2.0',
-          id: 1,
-          result: 'OK',
-        });
-
-        await executor.executeSnap(2, SNAP_NAME_2, CODE_2, TIMER_ENDOWMENTS);
-
-        expect(await executor.readCommand()).toStrictEqual({
-          jsonrpc: '2.0',
-          id: 2,
-          result: 'OK',
-        });
-
-        // The order of below is extremely important!
-
-        await executor.writeCommand({
-          jsonrpc: '2.0',
-          id: 3,
-          method: 'snapRpc',
-          params: [
-            SNAP_NAME_1,
-            ON_RPC_REQUEST,
-            FAKE_ORIGIN,
-            { jsonrpc: '2.0', method: 'set' },
-          ],
-        });
-
-        await executor.writeCommand({
-          jsonrpc: '2.0',
-          id: 4,
-          method: 'snapRpc',
-          params: [
-            SNAP_NAME_1,
-            ON_RPC_REQUEST,
-            FAKE_ORIGIN,
-            { jsonrpc: '2.0', method: 'getHandle' },
-          ],
-        });
-
-        const getHandleResult = await executor.readCommand();
-        expect(getHandleResult).toStrictEqual(
-          expect.objectContaining({
-            jsonrpc: '2.0',
-            id: 4,
-            result: expect.anything(),
-          }),
-        );
-
-        assertIsJsonRpcSuccess(getHandleResult);
-        const handle = getHandleResult.result;
-
-        await executor.writeCommand({
-          jsonrpc: '2.0',
-          id: 5,
-          method: 'snapRpc',
-          params: [
-            SNAP_NAME_2,
-            ON_RPC_REQUEST,
-            FAKE_ORIGIN,
-            { jsonrpc: '2.0', method: '', params: [handle] },
-          ],
-        });
-
-        expect(await executor.readCommand()).toStrictEqual({
-          jsonrpc: '2.0',
-          id: 5,
-          result: 'SNAP 2 OK',
-        });
-
-        jest.advanceTimersByTime(1000);
-
-        expect(await executor.readCommand()).toStrictEqual({
-          jsonrpc: '2.0',
-          id: 3,
-          result: 'SNAP 1 OK',
-        });
-      },
-    );
   });
 
   it('terminates a request when terminate RPC is called', async () => {
@@ -707,6 +389,80 @@ describe('BaseSnapExecutor', () => {
     });
   });
 
+  it('allows direct access to snap public properties', async () => {
+    const CODE = `
+      module.exports.onRpcRequest = () => {
+        snap.request;
+        return snap.request({ method: 'wallet_getSnaps', params: [] }) };
+    `;
+    const executor = new TestSnapExecutor();
+
+    await executor.executeSnap(1, FAKE_SNAP_NAME, CODE, ['ethereum']);
+
+    expect(await executor.readCommand()).toStrictEqual({
+      jsonrpc: '2.0',
+      id: 1,
+      result: 'OK',
+    });
+
+    await executor.writeCommand({
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'snapRpc',
+      params: [
+        FAKE_SNAP_NAME,
+        ON_RPC_REQUEST,
+        FAKE_ORIGIN,
+        { jsonrpc: '2.0', method: '', params: [] },
+      ],
+    });
+
+    expect(await executor.readCommand()).toStrictEqual({
+      jsonrpc: '2.0',
+      method: 'OutboundRequest',
+    });
+
+    const getSnapsRequest = await executor.readRpc();
+    expect(getSnapsRequest).toStrictEqual({
+      name: 'metamask-provider',
+      data: {
+        id: expect.any(Number),
+        jsonrpc: '2.0',
+        method: 'wallet_getSnaps',
+        params: [],
+      },
+    });
+
+    const mockSnapsResult = {
+      snaps: {
+        // eslint-disable-next-line @typescript-eslint/naming-convention
+        'npm:@metamask/example-snap': {
+          version: '1.0.0',
+        },
+      },
+    };
+    await executor.writeRpc({
+      name: 'metamask-provider',
+      data: {
+        jsonrpc: '2.0',
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+        id: getSnapsRequest.data.id!,
+        result: mockSnapsResult,
+      },
+    });
+
+    expect(await executor.readCommand()).toStrictEqual({
+      jsonrpc: '2.0',
+      method: 'OutboundResponse',
+    });
+
+    expect(await executor.readCommand()).toStrictEqual({
+      id: 2,
+      jsonrpc: '2.0',
+      result: mockSnapsResult,
+    });
+  });
+
   it("doesn't allow direct access to ethereum internals", async () => {
     const CODE = `
       module.exports.onRpcRequest = () => ethereum._rpcEngine.handle({ method: 'snap_confirm', params: [] });
@@ -781,6 +537,46 @@ describe('BaseSnapExecutor', () => {
             code: 'ERR_ASSERTION',
           },
         },
+      },
+      id: 2,
+    });
+  });
+
+  it('only allows certain methods in ethereum API', async () => {
+    const CODE = `
+      module.exports.onRpcRequest = () => ethereum.request({ method: 'snap_dialog', params: [] });
+    `;
+    const executor = new TestSnapExecutor();
+
+    await executor.executeSnap(1, FAKE_SNAP_NAME, CODE, ['ethereum']);
+
+    expect(await executor.readCommand()).toStrictEqual({
+      jsonrpc: '2.0',
+      id: 1,
+      result: 'OK',
+    });
+
+    await executor.writeCommand({
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'snapRpc',
+      params: [
+        FAKE_SNAP_NAME,
+        ON_RPC_REQUEST,
+        FAKE_ORIGIN,
+        { jsonrpc: '2.0', method: '', params: [] },
+      ],
+    });
+
+    expect(await executor.readCommand()).toStrictEqual({
+      jsonrpc: '2.0',
+      error: {
+        code: -32601,
+        message: 'The method does not exist / is not available.',
+        data: {
+          method: 'snap_dialog',
+        },
+        stack: expect.anything(),
       },
       id: 2,
     });
@@ -1258,7 +1054,7 @@ describe('BaseSnapExecutor', () => {
     });
   });
 
-  it('throws if snap doesnt export keyring', async () => {
+  it("throws if snap doesn't export keyring", async () => {
     const CODE = `
     `;
     const executor = new TestSnapExecutor();
@@ -1380,7 +1176,7 @@ describe('BaseSnapExecutor', () => {
   it('does not return control to a snap after idle teardown', async () => {
     jest.useRealTimers();
     const consoleLogSpy = jest.spyOn(console, 'log');
-    const consoleWarnSpy = jest.spyOn(console, 'warn');
+    const logSpy = jest.spyOn(logging, 'log');
     const TIMER_ENDOWMENTS = [
       'setTimeout',
       'clearTimeout',
@@ -1477,7 +1273,7 @@ describe('BaseSnapExecutor', () => {
     });
 
     expect(consoleLogSpy).not.toHaveBeenCalledWith('Jailbreak');
-    expect(consoleWarnSpy).toHaveBeenCalledWith(
+    expect(logSpy).toHaveBeenCalledWith(
       'Late promise received after Snap finished execution. Promise will be dropped.',
     );
   });
@@ -1485,7 +1281,7 @@ describe('BaseSnapExecutor', () => {
   it('does not return control to a snap after idle teardown when request fails', async () => {
     jest.useRealTimers();
     const consoleLogSpy = jest.spyOn(console, 'log');
-    const consoleWarnSpy = jest.spyOn(console, 'warn');
+    const logSpy = jest.spyOn(logging, 'log');
     const TIMER_ENDOWMENTS = [
       'setTimeout',
       'clearTimeout',
@@ -1586,7 +1382,7 @@ describe('BaseSnapExecutor', () => {
     });
 
     expect(consoleLogSpy).not.toHaveBeenCalledWith('Jailbreak');
-    expect(consoleWarnSpy).toHaveBeenCalledWith(
+    expect(logSpy).toHaveBeenCalledWith(
       'Late promise received after Snap finished execution. Promise will be dropped.',
     );
   });
@@ -1693,6 +1489,43 @@ describe('BaseSnapExecutor', () => {
         data: expect.any(Object),
         message: 'Received non-JSON-serializable value.',
       },
+    });
+  });
+
+  it('contains the self-referential global scopes', async () => {
+    const CODE = `
+      module.exports.onRpcRequest = () => globalThis !== undefined &&
+        globalThis.self === self &&
+        globalThis === self.self &&
+        globalThis === window &&
+        globalThis === global &&
+        globalThis === global.global;
+    `;
+    const executor = new TestSnapExecutor();
+
+    await executor.executeSnap(1, FAKE_SNAP_NAME, CODE, []);
+    expect(await executor.readCommand()).toStrictEqual({
+      jsonrpc: '2.0',
+      id: 1,
+      result: 'OK',
+    });
+
+    await executor.writeCommand({
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'snapRpc',
+      params: [
+        FAKE_SNAP_NAME,
+        ON_RPC_REQUEST,
+        FAKE_ORIGIN,
+        { jsonrpc: '2.0', method: '', params: [] },
+      ],
+    });
+
+    expect(await executor.readCommand()).toStrictEqual({
+      jsonrpc: '2.0',
+      id: 2,
+      result: true,
     });
   });
 

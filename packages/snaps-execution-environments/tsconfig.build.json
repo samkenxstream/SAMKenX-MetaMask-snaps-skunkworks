@@ -11,9 +11,13 @@
     "**/*.test.ts",
     "./src/**/test-utils",
     "./src/**/__mocks__",
-    "./src/**/__snapshots__"
+    "./src/**/__snapshots__",
+    "webpack.config.js"
   ],
   "references": [
+    {
+      "path": "../rpc-methods/tsconfig.build.json"
+    },
     {
       "path": "../snaps-utils/tsconfig.build.json"
     }

@@ -200,6 +200,9 @@ export class NpmLocation implements SnapLocation {
   }
 }
 
+// Safety limit for tarballs, 250 MB in bytes
+const TARBALL_SIZE_SAFETY_LIMIT = 262144000;
+
 /**
  * Fetches the tarball (`.tgz` file) of the specified package and version from
  * the public npm registry. Throws an error if fetching fails.
@@ -219,9 +222,15 @@ async function fetchNpmTarball(
   registryUrl: URL | string,
   fetchFunction: typeof fetch,
 ): Promise<[ReadableStream, SemVerVersion]> {
-  const packageMetadata = await (
-    await fetchFunction(new URL(packageName, registryUrl).toString())
-  ).json();
+  const packageResponse = await fetchFunction(
+    new URL(packageName, registryUrl).toString(),
+  );
+  if (!packageResponse.ok) {
+    throw new Error(
+      `Failed to fetch NPM registry entry. Status code: ${packageResponse.status}.`,
+    );
+  }
+  const packageMetadata = await packageResponse.json();
 
   if (!isObject(packageMetadata)) {
     throw new Error(
@@ -267,6 +276,14 @@ async function fetchNpmTarball(
   if (!tarballResponse.ok || !tarballResponse.body) {
     throw new Error(`Failed to fetch tarball for package "${packageName}".`);
   }
+  // We assume that NPM is a good actor and provides us with a valid `content-length` header.
+  const tarballSizeString = tarballResponse.headers.get('content-length');
+  assert(tarballSizeString, 'Snap tarball has invalid content-length');
+  const tarballSize = parseInt(tarballSizeString, 10);
+  assert(
+    tarballSize <= TARBALL_SIZE_SAFETY_LIMIT,
+    'Snap tarball exceeds size limit',
+  );
   return [tarballResponse.body, targetVersion];
 }
 
@@ -292,9 +309,6 @@ function getNodeStream(stream: ReadableStream): Readable {
 
   return new ReadableWebToNodeStream(stream);
 }
-
-// Safety limit for tarballs, 250 MB in bytes
-const TARBALL_SIZE_SAFETY_LIMIT = 262144000;
 
 /**
  * Creates a `tar-stream` that will get the necessary files from an npm Snap

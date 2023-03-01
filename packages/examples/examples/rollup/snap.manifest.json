@@ -1,5 +1,5 @@
 {
-  "version": "0.28.0",
+  "version": "0.30.0",
   "description": "An example Snap built using TypeScript and Rollup",
   "proposedName": "rollup-snap",
   "repository": {
@@ -7,7 +7,7 @@
     "url": "https://github.com/MetaMask/snaps-monorepo.git"
   },
   "source": {
-    "shasum": "lEEbARveov0m6UMfgxjN4rOmWaD9v8YyyDKEB+aKRp0=",
+    "shasum": "t1mbnVmJBg5uzusIjKUBhss04A0oxeKZTMS7GZazCvw=",
     "location": {
       "npm": {
         "filePath": "dist/snap.js",

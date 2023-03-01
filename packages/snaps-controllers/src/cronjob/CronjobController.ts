@@ -8,8 +8,8 @@ import {
   SnapId,
   TruncatedSnap,
   CronjobSpecification,
-  flatten,
   parseCronExpression,
+  logError,
 } from '@metamask/snaps-utils';
 import { Duration, inMilliseconds } from '@metamask/utils';
 
@@ -123,7 +123,7 @@ export class CronjobController extends BaseController<
     /* eslint-enable @typescript-eslint/unbound-method */
 
     this.dailyCheckIn().catch((error) => {
-      console.error(error);
+      logError(error);
     });
   }
 
@@ -137,7 +137,8 @@ export class CronjobController extends BaseController<
     const filteredSnaps = getRunnableSnaps(snaps);
 
     const jobs = filteredSnaps.map((snap) => this.getSnapJobs(snap.id));
-    return flatten(jobs).filter((job) => job !== undefined) as Cronjob[];
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+    return jobs.flat().filter((job) => job !== undefined) as Cronjob[];
   }
 
   /**
@@ -201,7 +202,7 @@ export class CronjobController extends BaseController<
     timer.start(() => {
       this.executeCronjob(job).catch((error) => {
         // TODO: Decide how to handle errors.
-        console.error(error);
+        logError(error);
       });
 
       this.#timers.delete(job.id);
@@ -292,7 +293,7 @@ export class CronjobController extends BaseController<
     this.#dailyTimer.start(() => {
       this.dailyCheckIn().catch((error) => {
         // TODO: Decide how to handle errors.
-        console.error(error);
+        logError(error);
       });
     });
   }

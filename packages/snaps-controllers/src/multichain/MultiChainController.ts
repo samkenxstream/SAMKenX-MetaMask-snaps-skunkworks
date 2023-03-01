@@ -9,6 +9,7 @@ import {
   HasPermission,
   PermissionConstraint,
 } from '@metamask/permission-controller';
+import { WALLET_SNAP_PERMISSION_KEY } from '@metamask/rpc-methods';
 import {
   SnapKeyring,
   parseAccountId,
@@ -16,6 +17,7 @@ import {
   parseChainId,
   ChainId,
   ConnectArguments,
+  isSnapPermitted,
   HandlerType,
   NamespaceId,
   RequestArguments,
@@ -23,12 +25,10 @@ import {
   Session,
   TruncatedSnap,
   SnapId,
-  fromEntries,
   SessionNamespace,
-  flatten,
-  getSnapPermissionName,
   isAccountIdArray,
   Namespaces,
+  logError,
 } from '@metamask/snaps-utils';
 import { hasProperty, assert } from '@metamask/utils';
 import { nanoid } from 'nanoid';
@@ -178,7 +178,7 @@ export class MultiChainController extends BaseController<
     const filteredSnaps = getRunnableSnaps(snaps);
 
     // Get available namespaces supported by currently installed Snaps.
-    const availableNamespaces = fromEntries(
+    const availableNamespaces = Object.fromEntries(
       await Promise.all(
         filteredSnaps.map(async (snap) => [
           snap.id,
@@ -198,15 +198,18 @@ export class MultiChainController extends BaseController<
       origin,
     );
 
+    assert(
+      permissions !== undefined,
+      `${origin} does not have any permissions.`,
+    );
+
     // Find namespaces that can be satisfied with existing approved Snaps.
     const approvedNamespacesAndSnaps = Object.entries(namespaceToSnaps).reduce<
       Record<NamespaceId, SnapId[]>
     >((acc, [namespace, snapIds]) => {
-      const approvedSnaps = snapIds.filter((snapId) => {
-        return (
-          permissions && hasProperty(permissions, getSnapPermissionName(snapId))
-        );
-      });
+      const approvedSnaps = snapIds.filter((snapId) =>
+        isSnapPermitted(permissions, snapId),
+      );
 
       if (approvedSnaps.length > 0) {
         acc[namespace] = approvedSnaps;
@@ -247,7 +250,7 @@ export class MultiChainController extends BaseController<
     // need to show a prompt. This is handled by `resolveConflicts`.
     const resolvedAccounts = hasConflicts
       ? await this.resolveConflicts(origin, possibleAccounts)
-      : fromEntries(
+      : Object.fromEntries(
           Object.entries(possibleAccounts).map(
             ([namespace, snapAndAccounts]) => [
               namespace,
@@ -344,20 +347,21 @@ export class MultiChainController extends BaseController<
     const snapId = session.handlingSnaps[namespace];
     assert(snapId !== undefined);
 
-    const permissionName = getSnapPermissionName(snapId);
-
-    // Check if origin has permission to communicate with this Snap.
-    const hasPermission = this.messagingSystem.call(
-      'PermissionController:hasPermission',
-      origin,
-      permissionName,
-    );
-
     // TODO: Get permission for origin connecting to snap, or get user approval.
     // In the future this is where we should prompt for this permission.
     // In this iteration, we will grant this permission in `onConnect`.
+    const permissions = this.messagingSystem.call(
+      'PermissionController:getPermissions',
+      origin,
+    );
+
     assert(
-      hasPermission,
+      permissions !== undefined,
+      `${origin} does not have any permissions.`,
+    );
+
+    assert(
+      isSnapPermitted(permissions, snapId),
       `${origin} does not have permission to communicate with ${snapId}.`,
     );
 
@@ -426,7 +430,7 @@ export class MultiChainController extends BaseController<
       }
     } catch (error) {
       // Ignore errors for now
-      console.error(error);
+      logError(error);
     }
 
     return null;
@@ -468,7 +472,7 @@ export class MultiChainController extends BaseController<
     requestedNamespaces: Record<NamespaceId, RequestNamespace>,
   ): Promise<Record<NamespaceId, { snapId: SnapId; accounts: AccountId[] }[]>> {
     const dedupedSnaps = [
-      ...new Set(flatten(Object.values(namespacesAndSnaps))),
+      ...new Set(Object.values(namespacesAndSnaps).flat()),
     ] as SnapId[];
 
     const allAccounts = await dedupedSnaps.reduce<
@@ -544,14 +548,18 @@ export class MultiChainController extends BaseController<
     // Instead we should give origin only a read-only access to list of accounts
     // without allowing provider.request() talking to a snap before additional
     // user approval. The additional approval would be requested in `onRequest`.
+
     const approvedPermissions = Object.values(resolvedAccounts).reduce<
-      Record<string, Partial<PermissionConstraint>>
-    >((acc, cur) => {
-      if (cur !== null) {
-        acc[getSnapPermissionName(cur.snapId)] = {};
-      }
-      return acc;
-    }, {});
+      Record<string, Record<string, Partial<PermissionConstraint>>>
+    >(
+      (acc, curr) => {
+        if (curr !== null) {
+          acc[WALLET_SNAP_PERMISSION_KEY][curr.snapId] = {};
+        }
+        return acc;
+      },
+      { [WALLET_SNAP_PERMISSION_KEY]: {} },
+    );
 
     this.messagingSystem.call('PermissionController:grantPermissions', {
       approvedPermissions,

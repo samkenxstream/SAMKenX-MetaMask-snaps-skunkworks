@@ -1,15 +1,13 @@
 /* eslint-disable jest/prefer-strict-equal */
 
-import {
-  fromEntries,
-  getSnapPermissionName,
-  getSnapSourceShasum,
-} from '@metamask/snaps-utils';
+import { WALLET_SNAP_PERMISSION_KEY } from '@metamask/rpc-methods';
+import { getSnapChecksum } from '@metamask/snaps-utils';
 import {
   MOCK_ORIGIN,
   MOCK_SNAP_ID,
   getSnapManifest,
   getPersistedSnapObject,
+  getSnapFiles,
 } from '@metamask/snaps-utils/test-utils';
 import { assert } from '@metamask/utils';
 
@@ -55,7 +53,7 @@ describe('MultiChainController', () => {
           },
         },
       });
-      expect(rootMessenger.call).toHaveBeenCalledTimes(12);
+      expect(rootMessenger.call).toHaveBeenCalledTimes(10);
 
       snapController.destroy();
       await executionService.terminateAllSnaps();
@@ -99,7 +97,7 @@ describe('MultiChainController', () => {
         MOCK_SNAP_ID,
       );
 
-      expect(rootMessenger.call).toHaveBeenCalledTimes(23);
+      expect(rootMessenger.call).toHaveBeenCalledTimes(19);
 
       snapController.destroy();
       await executionService.terminateAllSnaps();
@@ -132,7 +130,7 @@ describe('MultiChainController', () => {
           }
 
           if (subject === MOCK_ORIGIN) {
-            return { [getSnapPermissionName(MOCK_SNAP_ID)]: {} };
+            return { [WALLET_SNAP_PERMISSION_KEY]: { [MOCK_SNAP_ID]: {} } };
           }
 
           return {};
@@ -153,7 +151,7 @@ describe('MultiChainController', () => {
         },
       });
 
-      expect(rootMessenger.call).toHaveBeenCalledTimes(10);
+      expect(rootMessenger.call).toHaveBeenCalledTimes(12);
 
       snapController.destroy();
       await executionService.terminateAllSnaps();
@@ -184,7 +182,9 @@ describe('MultiChainController', () => {
                 id: secondSnapId,
                 sourceCode: secondSnapSourceCode,
                 manifest: getSnapManifest({
-                  shasum: getSnapSourceShasum(secondSnapSourceCode),
+                  shasum: getSnapChecksum(
+                    getSnapFiles({ sourceCode: secondSnapSourceCode }),
+                  ),
                   initialPermissions:
                     PERSISTED_MOCK_KEYRING_SNAP.manifest.initialPermissions,
                 }),
@@ -210,8 +210,10 @@ describe('MultiChainController', () => {
 
           if (subject === MOCK_ORIGIN) {
             return {
-              [getSnapPermissionName(snap.id)]: {},
-              [getSnapPermissionName(snap2.id)]: {},
+              [WALLET_SNAP_PERMISSION_KEY]: {
+                [snap.id]: {},
+                [snap2.id]: {},
+              },
             };
           }
 
@@ -226,7 +228,7 @@ describe('MultiChainController', () => {
             assert(requestData?.possibleAccounts);
 
             return Promise.resolve(
-              fromEntries(
+              Object.fromEntries(
                 Object.entries(requestData.possibleAccounts).map(
                   ([namespace, snapAndAccounts]) => [
                     namespace,
@@ -303,7 +305,7 @@ describe('MultiChainController', () => {
                 ...PERSISTED_MOCK_KEYRING_SNAP,
                 sourceCode,
                 manifest: getSnapManifest({
-                  shasum: getSnapSourceShasum(sourceCode),
+                  shasum: getSnapChecksum(getSnapFiles({ sourceCode })),
                   initialPermissions:
                     PERSISTED_MOCK_KEYRING_SNAP.manifest.initialPermissions,
                 }),
@@ -359,7 +361,7 @@ describe('MultiChainController', () => {
       });
 
       expect(result).toEqual(['eip155:1:foo']);
-      expect(rootMessenger.call).toHaveBeenCalledTimes(17);
+      expect(rootMessenger.call).toHaveBeenCalledTimes(15);
 
       snapController.destroy();
       await executionService.terminateAllSnaps();

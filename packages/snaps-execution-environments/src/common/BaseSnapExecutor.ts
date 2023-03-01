@@ -2,12 +2,13 @@
 /// <reference path="../../../../node_modules/ses/index.d.ts" />
 import { StreamProvider } from '@metamask/providers';
 import { RequestArguments } from '@metamask/providers/dist/BaseProvider';
+import { SnapsGlobalObject } from '@metamask/rpc-methods';
 import {
   SnapExports,
-  SnapsGlobalObject,
   HandlerType,
   SnapExportsParameters,
   SNAP_EXPORT_NAMES,
+  logError,
 } from '@metamask/snaps-utils';
 import {
   isObject,
@@ -25,6 +26,7 @@ import { createIdRemapMiddleware } from 'json-rpc-engine';
 import { Duplex } from 'stream';
 import { validate } from 'superstruct';
 
+import { log } from '../logging';
 import EEOpenRPCDocument from '../openrpc.json';
 import {
   CommandMethodsMapping,
@@ -34,7 +36,7 @@ import { createEndowments } from './endowments';
 import { addEventListener, removeEventListener } from './globalEvents';
 import { wrapKeyring } from './keyring';
 import { sortParamKeys } from './sortParams';
-import { constructError, withTeardown } from './utils';
+import { constructError, proxyStreamProvider, withTeardown } from './utils';
 import {
   ExecuteSnapRequestArgumentsStruct,
   PingRequestArgumentsStruct,
@@ -113,7 +115,7 @@ export class BaseSnapExecutor {
     this.commandStream.on('data', (data) => {
       this.onCommandRequest(data).catch((error) => {
         // TODO: Decide how to handle errors.
-        console.error(error);
+        logError(error);
       });
     });
     this.rpcStream = rpcStream;
@@ -272,7 +274,7 @@ export class BaseSnapExecutor {
     sourceCode: string,
     _endowments?: string[],
   ): Promise<void> {
-    console.log(`starting snap '${snapName}' in worker`);
+    log(`Starting snap '${snapName}' in worker.`);
     if (this.snapPromiseErrorHandler) {
       removeEventListener('unhandledrejection', this.snapPromiseErrorHandler);
     }
@@ -325,9 +327,15 @@ export class BaseSnapExecutor {
         ...endowments,
         module: snapModule,
         exports: snapModule.exports,
-        window: { ...endowments },
-        self: { ...endowments },
       });
+      // All of those are JavaScript runtime specific and self referential,
+      // but we add them for compatibility sake with external libraries.
+      //
+      // We can't do that in the injected globals object above
+      // because SES creates its own globalThis
+      compartment.globalThis.self = compartment.globalThis;
+      compartment.globalThis.global = compartment.globalThis;
+      compartment.globalThis.window = compartment.globalThis;
 
       await this.executeInSnapContext(snapName, () => {
         compartment.evaluate(sourceCode);
@@ -382,7 +390,8 @@ export class BaseSnapExecutor {
 
     const request = async (args: RequestArguments) => {
       assert(
-        args.method.startsWith('wallet_') || args.method.startsWith('snap_'),
+        String.prototype.startsWith.call(args.method, 'wallet_') ||
+          String.prototype.startsWith.call(args.method, 'snap_'),
         'The global Snap API only allows RPC methods starting with `wallet_*` and `snap_*`.',
       );
       this.notify({ method: 'OutboundRequest' });
@@ -393,7 +402,25 @@ export class BaseSnapExecutor {
       }
     };
 
-    return { request };
+    // Proxy target is intentionally set to be an empty object, to ensure
+    // that access to the prototype chain is not possible.
+    const snapGlobalProxy = new Proxy(
+      {},
+      {
+        has(_target: object, prop: string | symbol) {
+          return typeof prop === 'string' && ['request'].includes(prop);
+        },
+        get(_target, prop: keyof StreamProvider) {
+          if (prop === 'request') {
+            return request;
+          }
+
+          return undefined;
+        },
+      },
+    ) as SnapsGlobalObject;
+
+    return harden(snapGlobalProxy);
   }
 
   /**
@@ -407,7 +434,7 @@ export class BaseSnapExecutor {
 
     const request = async (args: RequestArguments) => {
       assert(
-        !args.method.startsWith('snap_'),
+        !String.prototype.startsWith.call(args.method, 'snap_'),
         ethErrors.rpc.methodNotFound({
           data: {
             method: args.method,
@@ -422,20 +449,9 @@ export class BaseSnapExecutor {
       }
     };
 
-    // To harden and limit access to internals, we use a proxy.
-    const proxy = new Proxy(provider, {
-      get(target, prop: keyof StreamProvider) {
-        if (prop === 'request') {
-          return request;
-        } else if (['on', 'removeListener'].includes(prop)) {
-          return target[prop];
-        }
+    const streamProviderProxy = proxyStreamProvider(provider, request);
 
-        return undefined;
-      },
-    });
-
-    return proxy;
+    return harden(streamProviderProxy);
   }
 
   /**

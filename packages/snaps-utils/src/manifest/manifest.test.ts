@@ -3,13 +3,13 @@ import { join } from 'path';
 
 import { readJsonFile } from '../fs';
 import * as npm from '../npm';
-import { fromEntries } from '../object';
 import { ProgrammaticallyFixableSnapError } from '../snaps';
 import {
   DEFAULT_SNAP_BUNDLE,
   DEFAULT_SNAP_ICON,
   DEFAULT_SNAP_SHASUM,
   getPackageJson,
+  getSnapFiles,
   getSnapManifest,
 } from '../test-utils';
 import {
@@ -20,6 +20,7 @@ import {
 import {
   checkManifest,
   fixManifest,
+  getSnapIcon,
   getSnapSourceCode,
   getWritableManifest,
 } from './manifest';
@@ -55,9 +56,10 @@ describe('checkManifest', () => {
   });
 
   it('returns the status and warnings after processing', async () => {
-    const { updated, warnings } = await checkManifest(BASE_PATH);
-    expect(updated).toBe(false);
+    const { updated, warnings, errors } = await checkManifest(BASE_PATH);
     expect(warnings).toHaveLength(0);
+    expect(errors).toHaveLength(0);
+    expect(updated).toBe(false);
   });
 
   it('updates and writes the manifest', async () => {
@@ -75,7 +77,8 @@ describe('checkManifest', () => {
     expect(updated).toBe(true);
     expect(warnings).toHaveLength(0);
 
-    const { source } = await readJsonFile<SnapManifest>(MANIFEST_PATH);
+    const file = await readJsonFile<SnapManifest>(MANIFEST_PATH);
+    const { source } = file.result;
     expect(source.shasum).toBe(DEFAULT_SNAP_SHASUM);
   });
 
@@ -95,7 +98,8 @@ describe('checkManifest', () => {
     expect(updated).toBe(true);
     expect(warnings).toHaveLength(0);
 
-    const { source, version } = await readJsonFile<SnapManifest>(MANIFEST_PATH);
+    const file = await readJsonFile<SnapManifest>(MANIFEST_PATH);
+    const { source, version } = file.result;
     expect(source.shasum).toBe(DEFAULT_SNAP_SHASUM);
     expect(version).toBe('1.0.0');
   });
@@ -159,11 +163,12 @@ describe('checkManifest', () => {
 
 describe('fixManifest', () => {
   it('fixes a name mismatch in the manifest', () => {
-    const files: SnapFiles = {
+    const files: SnapFiles = getSnapFiles({
       manifest: getSnapManifest({ packageName: 'foo' }),
       packageJson: getPackageJson({ name: 'bar' }),
       sourceCode: DEFAULT_SNAP_BUNDLE,
-    };
+      updateChecksum: false,
+    });
 
     const manifest = fixManifest(
       files,
@@ -173,15 +178,18 @@ describe('fixManifest', () => {
       ),
     );
 
-    expect(manifest).toStrictEqual(getSnapManifest({ packageName: 'bar' }));
+    expect(manifest.result).toStrictEqual(
+      getSnapManifest({ packageName: 'bar' }),
+    );
   });
 
   it('fixes a version mismatch in the manifest', () => {
-    const files: SnapFiles = {
+    const files: SnapFiles = getSnapFiles({
       manifest: getSnapManifest({ version: '1' }),
       packageJson: getPackageJson({ version: '2' }),
       sourceCode: DEFAULT_SNAP_BUNDLE,
-    };
+      updateChecksum: false,
+    });
 
     const manifest = fixManifest(
       files,
@@ -191,15 +199,16 @@ describe('fixManifest', () => {
       ),
     );
 
-    expect(manifest).toStrictEqual(getSnapManifest({ version: '2' }));
+    expect(manifest.result).toStrictEqual(getSnapManifest({ version: '2' }));
   });
 
   it('fixes a repository mismatch in the manifest', () => {
-    const files: SnapFiles = {
+    const files: SnapFiles = getSnapFiles({
       manifest: getSnapManifest({ repository: { type: 'git', url: 'foo' } }),
       packageJson: getPackageJson({ repository: { type: 'git', url: 'bar' } }),
       sourceCode: DEFAULT_SNAP_BUNDLE,
-    };
+      updateChecksum: false,
+    });
 
     const manifest = fixManifest(
       files,
@@ -209,19 +218,21 @@ describe('fixManifest', () => {
       ),
     );
 
-    expect(manifest).toStrictEqual(
+    expect(manifest.result).toStrictEqual(
       getSnapManifest({ repository: { type: 'git', url: 'bar' } }),
     );
   });
 
   it('fixes a shasum mismatch in the manifest', () => {
-    const files: SnapFiles = {
+    const files: SnapFiles = getSnapFiles({
       manifest: getSnapManifest({
         shasum: '29MYwcRiruhy9BEJpN/TBIhxoD3t0P4OdXztV9rW8tc=',
       }),
       packageJson: getPackageJson(),
       sourceCode: DEFAULT_SNAP_BUNDLE,
-    };
+      svgIcon: DEFAULT_SNAP_ICON,
+      updateChecksum: false,
+    });
 
     const manifest = fixManifest(
       files,
@@ -231,7 +242,7 @@ describe('fixManifest', () => {
       ),
     );
 
-    expect(manifest).toStrictEqual(getSnapManifest());
+    expect(manifest.result).toStrictEqual(getSnapManifest());
   });
 });
 
@@ -241,9 +252,13 @@ describe('getSnapSourceCode', () => {
   });
 
   it('returns the source code for a snap', async () => {
-    expect(await getSnapSourceCode(BASE_PATH, getSnapManifest())).toBe(
-      DEFAULT_SNAP_BUNDLE,
-    );
+    const file = await getSnapSourceCode(BASE_PATH, getSnapManifest());
+    expect(file?.value).toBe(DEFAULT_SNAP_BUNDLE);
+  });
+
+  it('returns the source code override if passed', async () => {
+    const file = await getSnapSourceCode(BASE_PATH, getSnapManifest(), 'foo');
+    expect(file?.value).toBe('foo');
   });
 
   it.each([
@@ -270,10 +285,46 @@ describe('getSnapSourceCode', () => {
   });
 });
 
+describe('getSnapIcon', () => {
+  beforeEach(async () => {
+    await resetFileSystem();
+  });
+
+  it('returns the icon for a snap', async () => {
+    const file = await getSnapIcon(BASE_PATH, getSnapManifest());
+    expect(file?.value).toBe(DEFAULT_SNAP_ICON);
+  });
+
+  it.each([
+    [],
+    {},
+    undefined,
+    null,
+    { source: {} },
+    { source: { location: {} } },
+    { source: { location: { npm: {} } } },
+  ])('returns undefined if an invalid manifest is passed', async (manifest) => {
+    // @ts-expect-error Invalid manifest type.
+    expect(await getSnapIcon(BASE_PATH, manifest)).toBeUndefined();
+  });
+
+  it('throws an error if the file cannot be read', async () => {
+    jest.spyOn(fs, 'readFile').mockImplementation(() => {
+      throw new Error('foo');
+    });
+
+    await expect(getSnapIcon(BASE_PATH, getSnapManifest())).rejects.toThrow(
+      'Failed to read Snap icon file: foo',
+    );
+  });
+});
+
 describe('getWritableManifest', () => {
   it('sorts the manifest keys', () => {
     // This reverses the order of the keys in the manifest.
-    const manifest = fromEntries(Object.entries(getSnapManifest()).reverse());
+    const manifest = Object.fromEntries(
+      Object.entries(getSnapManifest()).reverse(),
+    );
 
     const writableManifest = getWritableManifest(manifest as SnapManifest);
     expect(Object.keys(writableManifest)).toStrictEqual(

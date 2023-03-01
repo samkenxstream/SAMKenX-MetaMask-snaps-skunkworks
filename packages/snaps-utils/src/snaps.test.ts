@@ -1,34 +1,67 @@
+import {
+  SubjectPermissions,
+  PermissionConstraint,
+} from '@metamask/permission-controller';
 import { is } from 'superstruct';
 
+import { SnapCaveatType } from './caveats';
 import {
+  isSnapPermitted,
   HttpSnapIdStruct,
   isCaipChainId,
   LocalSnapIdStruct,
   NpmSnapIdStruct,
-  validateSnapId,
+  assertIsValidSnapId,
+  verifyRequestedSnapPermissions,
 } from './snaps';
-import { SnapIdPrefixes, uri } from './types';
+import { uri, WALLET_SNAP_PERMISSION_KEY } from './types';
 
-describe('validateSnapId', () => {
+describe('assertIsValidSnapId', () => {
   it.each([undefined, {}, null, true, 2])(
     'throws for non-strings (#%#)',
     (value) => {
-      expect(() => validateSnapId(value)).toThrow(
-        'Invalid snap id. Not a string.',
+      expect(() => assertIsValidSnapId(value)).toThrow(
+        // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
+        `Invalid snap ID: Expected the value to satisfy a union of \`intersection | string\`, but received: ${value}.`,
       );
     },
   );
 
   it('throws for invalid snap id', () => {
-    expect(() => validateSnapId('foo:bar')).toThrow(
-      'Invalid snap id. Unknown prefix.',
+    expect(() => assertIsValidSnapId('foo:bar')).toThrow(
+      `Invalid snap ID: Expected the value to satisfy a union of \`intersection | string\`, but received: "foo:bar".`,
     );
   });
 
-  it.each(Object.values(SnapIdPrefixes))(
-    'returns with "%s" prefix',
-    (prefix) => {
-      expect(() => validateSnapId(`${prefix}bar`)).not.toThrow();
+  it('supports valid NPM IDs', () => {
+    expect(() =>
+      assertIsValidSnapId('npm:@metamask/test-snap-bip44'),
+    ).not.toThrow();
+  });
+
+  it('supports valid local IDs', () => {
+    expect(() =>
+      assertIsValidSnapId('local:http://localhost:8000'),
+    ).not.toThrow();
+  });
+
+  it.each([
+    ' local:http://localhost:8000',
+    'local:http://localhost:8000 ',
+    'local:http://localhost:8000\n',
+    'local:http://localhost:8000\r',
+  ])('disallows whitespace #%#', (value) => {
+    expect(() => assertIsValidSnapId(value)).toThrow(
+      /Invalid snap ID: Expected the value to satisfy a union of `intersection \| string`, but received: .+\./u,
+    );
+  });
+
+  it.each(['local:😎', 'local:␡'])(
+    'disallows non-ASCII symbols #%#',
+    (value) => {
+      expect(() => assertIsValidSnapId(value)).toThrow(
+        `Invalid snap ID: Expected the value to satisfy a union of \`intersection | string\`, but received: "${value}".`,
+      );
     },
   );
 });
@@ -190,5 +223,91 @@ describe('HttpSnapIdStruct', () => {
     'http://github.com/snap?foo=true#bar',
   ])('invalidates an improper http ID (#%#)', (value) => {
     expect(is(value, HttpSnapIdStruct)).toBe(false);
+  });
+});
+
+describe('isSnapPermitted', () => {
+  it("will check an origin's permissions object to see if it has permission to interact with a specific snap", () => {
+    const validPermissions: SubjectPermissions<PermissionConstraint> = {
+      [WALLET_SNAP_PERMISSION_KEY]: {
+        date: 1,
+        id: '1',
+        invoker: 'example.com',
+        parentCapability: 'wallet_snap',
+        caveats: [
+          {
+            type: 'snapIds',
+            value: {
+              foo: {},
+            },
+          },
+        ],
+      },
+    };
+
+    const invalidPermissions1: SubjectPermissions<PermissionConstraint> = {
+      [WALLET_SNAP_PERMISSION_KEY]: {
+        date: 1,
+        id: '1',
+        invoker: 'example.com',
+        parentCapability: 'wallet_snap',
+        caveats: [
+          {
+            type: 'snapIds',
+            value: {
+              bar: {},
+            },
+          },
+        ],
+      },
+    };
+
+    const invalidPermissions2: SubjectPermissions<PermissionConstraint> = {
+      foo: {
+        date: 1,
+        id: '1',
+        invoker: 'example.com',
+        parentCapability: 'foo',
+        caveats: null,
+      },
+    };
+
+    expect(isSnapPermitted(validPermissions, 'foo')).toBe(true);
+    expect(isSnapPermitted(invalidPermissions1, 'foo')).toBe(false);
+    expect(isSnapPermitted(invalidPermissions2, 'foo')).toBe(false);
+  });
+
+  describe('verifyRequestedSnapPermissions', () => {
+    it.each([
+      { request: null, error: 'Requested permissions must be an object.' },
+      {
+        request: { foo: {} },
+        error: `${WALLET_SNAP_PERMISSION_KEY} is missing from the requested permissions.`,
+      },
+      {
+        request: { [WALLET_SNAP_PERMISSION_KEY]: { caveats: null } },
+        error: `${WALLET_SNAP_PERMISSION_KEY} must have a caveat property with a single-item array value.`,
+      },
+      {
+        request: { [WALLET_SNAP_PERMISSION_KEY]: { caveats: [{}, {}] } },
+        error: `${WALLET_SNAP_PERMISSION_KEY} must have a caveat property with a single-item array value.`,
+      },
+      {
+        request: { [WALLET_SNAP_PERMISSION_KEY]: { caveats: [{ foo: {} }] } },
+        error: `The requested permissions do not have a valid ${SnapCaveatType.SnapIds} caveat.`,
+      },
+      {
+        request: {
+          [WALLET_SNAP_PERMISSION_KEY]: {
+            caveats: [{ type: SnapCaveatType.SnapIds, foo: {} }],
+          },
+        },
+        error: `The requested permissions do not have a valid ${SnapCaveatType.SnapIds} caveat.`,
+      },
+    ])('will throw in failure scenarios', (test) => {
+      expect(() => verifyRequestedSnapPermissions(test.request)).toThrow(
+        test.error,
+      );
+    });
   });
 });

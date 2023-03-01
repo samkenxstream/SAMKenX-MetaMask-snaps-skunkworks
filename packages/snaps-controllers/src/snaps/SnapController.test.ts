@@ -4,16 +4,15 @@ import {
   SubjectPermissions,
   ValidPermission,
 } from '@metamask/permission-controller';
+import { WALLET_SNAP_PERMISSION_KEY } from '@metamask/rpc-methods';
 import {
   DEFAULT_ENDOWMENTS,
-  getSnapSourceShasum,
+  getSnapChecksum,
   HandlerType,
   SnapCaveatType,
   SnapPermissions,
   SnapStatus,
   VirtualFile,
-  SnapManifest,
-  NpmSnapFileNames,
   DEFAULT_REQUESTED_SNAP_VERSION,
 } from '@metamask/snaps-utils';
 import {
@@ -21,6 +20,7 @@ import {
   DEFAULT_SNAP_ICON,
   getMockSnapData,
   getPersistedSnapObject,
+  getSnapFiles,
   getSnapManifest,
   getSnapObject,
   getTruncatedSnap,
@@ -59,6 +59,9 @@ import {
   loopbackDetect,
   LoopbackLocation,
   MockSnapsRegistry,
+  MOCK_WALLET_SNAP_PERMISSION,
+  MOCK_SNAP_PERMISSIONS,
+  MOCK_ORIGIN_PERMISSIONS,
 } from '../test-utils';
 import { delay } from '../utils';
 import { handlerEndowments, SnapEndowments } from './endowments';
@@ -280,7 +283,6 @@ describe('SnapController', () => {
         state: {
           snaps: getPersistedSnapsState(
             getPersistedSnapObject({
-              permissionName: 'fooperm',
               version: '0.0.1',
               sourceCode: DEFAULT_SNAP_BUNDLE,
               id: 'npm:foo',
@@ -567,6 +569,12 @@ describe('SnapController', () => {
     ]);
 
     const expectedSnapObject = getTruncatedSnap();
+    const permissions = {
+      ...getSnapManifest().initialPermissions,
+      [SnapEndowments.Rpc]: {
+        caveats: [{ type: 'rpcOrigin', value: { dapps: false, snaps: true } }],
+      },
+    };
 
     expect(
       await snapController.installSnaps(MOCK_ORIGIN, {
@@ -579,9 +587,8 @@ describe('SnapController', () => {
     expect(messenger.call).toHaveBeenCalledTimes(5);
     expect(messenger.call).toHaveBeenNthCalledWith(
       1,
-      'PermissionController:hasPermission',
+      'PermissionController:getPermissions',
       MOCK_ORIGIN,
-      expectedSnapObject.permissionName,
     );
 
     expect(messenger.call).toHaveBeenNthCalledWith(
@@ -594,7 +601,7 @@ describe('SnapController', () => {
             dappOrigin: MOCK_ORIGIN,
             id: expect.any(String),
           },
-          permissions: getSnapManifest().initialPermissions,
+          permissions,
           snapId: MOCK_SNAP_ID,
         },
       }),
@@ -632,13 +639,18 @@ describe('SnapController', () => {
         requiredMethods: [],
       },
     };
+
+    const { manifest } = getSnapFiles({
+      manifest: getSnapManifest({
+        initialPermissions,
+      }),
+    });
+
     const snapController = getSnapController(
       getSnapControllerOptions({
         messenger,
         detectSnapLocation: loopbackDetect({
-          manifest: getSnapManifest({
-            initialPermissions,
-          }),
+          manifest: manifest.result,
         }),
       }),
     );
@@ -695,9 +707,7 @@ describe('SnapController', () => {
     );
 
     const authorizeSpy = jest.spyOn(controller as any, 'authorize');
-    const messengerCallMock = jest
-      .spyOn(messenger, 'call')
-      .mockImplementationOnce(() => true);
+    const messengerCallMock = jest.spyOn(messenger, 'call');
 
     await controller.installSnaps(MOCK_ORIGIN, {
       [MOCK_SNAP_ID]: { version: '>0.9.0 <1.1.0' },
@@ -710,9 +720,8 @@ describe('SnapController', () => {
     expect(messengerCallMock).toHaveBeenCalledTimes(1);
     expect(messengerCallMock).toHaveBeenNthCalledWith(
       1,
-      'PermissionController:hasPermission',
+      'PermissionController:getPermissions',
       MOCK_ORIGIN,
-      newSnap?.permissionName,
     );
   });
 
@@ -725,14 +734,20 @@ describe('SnapController', () => {
       }),
     );
 
+    const permission = {
+      [WALLET_SNAP_PERMISSION_KEY]: MOCK_WALLET_SNAP_PERMISSION,
+    };
+
     jest
       .spyOn(messenger, 'call')
-      .mockImplementation((method, ..._params: unknown[]) => {
-        if (method === 'ApprovalController:addRequest') {
-          throw ethErrors.provider.userRejectedRequest();
-        }
-        return true;
-      });
+      .mockImplementationOnce(() => permission)
+      .mockImplementationOnce(() => {
+        throw ethErrors.provider.userRejectedRequest();
+      })
+      .mockImplementationOnce(() => true)
+      .mockImplementationOnce(() => false)
+      .mockImplementationOnce(() => [MOCK_ORIGIN])
+      .mockImplementationOnce(() => permission);
 
     await expect(
       controller.installSnaps(MOCK_ORIGIN, {
@@ -752,12 +767,7 @@ describe('SnapController', () => {
       }),
     );
 
-    const messengerCallMock = jest
-      .spyOn(messenger, 'call')
-      .mockImplementationOnce(() => true)
-      .mockImplementation();
-
-    jest.spyOn(messenger, 'publish');
+    const messengerCallMock = jest.spyOn(messenger, 'call');
 
     jest
       .spyOn(snapController as any, 'authorize')
@@ -782,20 +792,17 @@ describe('SnapController', () => {
       }),
     ]);
 
-    const expectedSnapObject = getTruncatedSnap();
-
     await expect(
       snapController.installSnaps(MOCK_ORIGIN, {
         [MOCK_SNAP_ID]: {},
       }),
     ).rejects.toThrow('foo');
 
-    expect(messengerCallMock).toHaveBeenCalledTimes(3);
+    expect(messengerCallMock).toHaveBeenCalledTimes(6);
     expect(messengerCallMock).toHaveBeenNthCalledWith(
       1,
-      'PermissionController:hasPermission',
+      'PermissionController:getPermissions',
       MOCK_ORIGIN,
-      expectedSnapObject.permissionName,
     );
 
     await eventSubscriptionPromise;
@@ -953,7 +960,7 @@ describe('SnapController', () => {
           getPersistedSnapObject({
             sourceCode,
             manifest: getSnapManifest({
-              shasum: getSnapSourceShasum(sourceCode),
+              shasum: getSnapChecksum(getSnapFiles({ sourceCode })),
             }),
           }),
         ),
@@ -1028,7 +1035,7 @@ describe('SnapController', () => {
           getPersistedSnapObject({
             sourceCode,
             manifest: getSnapManifest({
-              shasum: getSnapSourceShasum(sourceCode),
+              shasum: getSnapChecksum(getSnapFiles({ sourceCode })),
             }),
           }),
         ),
@@ -1199,7 +1206,7 @@ describe('SnapController', () => {
           getPersistedSnapObject({
             sourceCode,
             manifest: getSnapManifest({
-              shasum: getSnapSourceShasum(sourceCode),
+              shasum: getSnapChecksum(getSnapFiles({ sourceCode })),
             }),
           }),
         ),
@@ -1689,9 +1696,8 @@ describe('SnapController', () => {
       expect(result).toStrictEqual({ [MOCK_SNAP_ID]: truncatedSnap });
       expect(messenger.call).toHaveBeenCalledTimes(1);
       expect(messenger.call).toHaveBeenCalledWith(
-        'PermissionController:hasPermission',
+        'PermissionController:getPermissions',
         MOCK_ORIGIN,
-        snapObject.permissionName,
       );
       expect(authorizeSpy).not.toHaveBeenCalled();
     });
@@ -1723,6 +1729,15 @@ describe('SnapController', () => {
         }),
       );
 
+      const permissions = {
+        ...getSnapManifest().initialPermissions,
+        [SnapEndowments.Rpc]: {
+          caveats: [
+            { type: 'rpcOrigin', value: { dapps: false, snaps: true } },
+          ],
+        },
+      };
+
       const stopSnapSpy = jest.spyOn(snapController, 'stopSnap');
 
       const result = await snapController.installSnaps(MOCK_ORIGIN, {
@@ -1734,9 +1749,8 @@ describe('SnapController', () => {
       expect(messenger.call).toHaveBeenCalledTimes(5);
       expect(messenger.call).toHaveBeenNthCalledWith(
         1,
-        'PermissionController:hasPermission',
+        'PermissionController:getPermissions',
         MOCK_ORIGIN,
-        snapObject.permissionName,
       );
 
       expect(messenger.call).toHaveBeenNthCalledWith(
@@ -1749,7 +1763,7 @@ describe('SnapController', () => {
               dappOrigin: MOCK_ORIGIN,
               id: expect.any(String),
             },
-            permissions: getSnapManifest().initialPermissions,
+            permissions,
             snapId: MOCK_LOCAL_SNAP_ID,
           },
         }),
@@ -1760,7 +1774,7 @@ describe('SnapController', () => {
         3,
         'PermissionController:grantPermissions',
         {
-          approvedPermissions: getSnapManifest().initialPermissions,
+          approvedPermissions: permissions,
           subject: { origin: MOCK_LOCAL_SNAP_ID },
           requestData: {
             metadata: {
@@ -1797,8 +1811,12 @@ describe('SnapController', () => {
       const version = '0.0.1';
       const newVersion = '0.0.2';
 
-      const manifest = getSnapManifest({ version });
-      const newManifest = getSnapManifest({ version: newVersion });
+      const { manifest } = getSnapFiles({
+        manifest: getSnapManifest({ version }),
+      });
+      const { manifest: newManifest } = getSnapFiles({
+        manifest: getSnapManifest({ version: newVersion }),
+      });
       const truncatedSnap = getTruncatedSnap({
         version: newVersion,
         id: MOCK_LOCAL_SNAP_ID,
@@ -1806,12 +1824,8 @@ describe('SnapController', () => {
 
       const location = new LoopbackLocation({ shouldAlwaysReload: true });
       location.manifest
-        .mockImplementationOnce(async () =>
-          Promise.resolve(new VirtualFile({ value: '', result: manifest })),
-        )
-        .mockImplementationOnce(async () =>
-          Promise.resolve(new VirtualFile({ value: '', result: newManifest })),
-        );
+        .mockImplementationOnce(async () => Promise.resolve(manifest))
+        .mockImplementationOnce(async () => Promise.resolve(newManifest));
 
       const snapController = getSnapController(
         getSnapControllerOptions({
@@ -1819,6 +1833,15 @@ describe('SnapController', () => {
           detectSnapLocation: loopbackDetect(location),
         }),
       );
+
+      const permissions = {
+        ...getSnapManifest().initialPermissions,
+        [SnapEndowments.Rpc]: {
+          caveats: [
+            { type: 'rpcOrigin', value: { dapps: false, snaps: true } },
+          ],
+        },
+      };
 
       const stopSnapSpy = jest.spyOn(snapController, 'stopSnap');
 
@@ -1837,9 +1860,8 @@ describe('SnapController', () => {
       expect(messenger.call).toHaveBeenCalledTimes(11);
       expect(messenger.call).toHaveBeenNthCalledWith(
         1,
-        'PermissionController:hasPermission',
+        'PermissionController:getPermissions',
         MOCK_ORIGIN,
-        truncatedSnap.permissionName,
       );
 
       expect(messenger.call).toHaveBeenNthCalledWith(
@@ -1852,7 +1874,7 @@ describe('SnapController', () => {
               dappOrigin: MOCK_ORIGIN,
               id: expect.any(String),
             },
-            permissions: manifest.initialPermissions,
+            permissions,
             snapId: MOCK_LOCAL_SNAP_ID,
           },
         }),
@@ -1863,7 +1885,7 @@ describe('SnapController', () => {
         3,
         'PermissionController:grantPermissions',
         {
-          approvedPermissions: manifest.initialPermissions,
+          approvedPermissions: permissions,
           subject: { origin: MOCK_LOCAL_SNAP_ID },
           requestData: {
             metadata: {
@@ -1891,9 +1913,8 @@ describe('SnapController', () => {
 
       expect(messenger.call).toHaveBeenNthCalledWith(
         6,
-        'PermissionController:hasPermission',
+        'PermissionController:getPermissions',
         MOCK_ORIGIN,
-        truncatedSnap.permissionName,
       );
 
       expect(messenger.call).toHaveBeenNthCalledWith(
@@ -1912,7 +1933,7 @@ describe('SnapController', () => {
               dappOrigin: MOCK_ORIGIN,
               id: expect.any(String),
             },
-            permissions: newManifest.initialPermissions,
+            permissions,
             snapId: MOCK_LOCAL_SNAP_ID,
           },
         }),
@@ -1923,7 +1944,7 @@ describe('SnapController', () => {
         9,
         'PermissionController:grantPermissions',
         {
-          approvedPermissions: newManifest.initialPermissions,
+          approvedPermissions: permissions,
           subject: { origin: MOCK_LOCAL_SNAP_ID },
           requestData: {
             metadata: {
@@ -1966,6 +1987,15 @@ describe('SnapController', () => {
         initialPermissions: manifest.initialPermissions,
       });
 
+      const permissions = {
+        ...getSnapManifest().initialPermissions,
+        [SnapEndowments.Rpc]: {
+          caveats: [
+            { type: 'rpcOrigin', value: { dapps: false, snaps: true } },
+          ],
+        },
+      };
+
       const result = await snapController.installSnaps(MOCK_ORIGIN, {
         [MOCK_SNAP_ID]: {},
       });
@@ -1976,9 +2006,8 @@ describe('SnapController', () => {
       expect(messenger.call).toHaveBeenCalledTimes(5);
       expect(messenger.call).toHaveBeenNthCalledWith(
         1,
-        'PermissionController:hasPermission',
+        'PermissionController:getPermissions',
         MOCK_ORIGIN,
-        truncatedSnap.permissionName,
       );
 
       expect(messenger.call).toHaveBeenNthCalledWith(
@@ -1991,7 +2020,7 @@ describe('SnapController', () => {
               dappOrigin: MOCK_ORIGIN,
               id: expect.any(String),
             },
-            permissions: manifest.initialPermissions,
+            permissions,
             snapId: MOCK_SNAP_ID,
           },
         }),
@@ -2002,7 +2031,7 @@ describe('SnapController', () => {
         3,
         'PermissionController:grantPermissions',
         {
-          approvedPermissions: manifest.initialPermissions,
+          approvedPermissions: permissions,
           subject: { origin: MOCK_SNAP_ID },
           requestData: {
             metadata: {
@@ -2035,16 +2064,19 @@ describe('SnapController', () => {
         'endowment:long-running': {},
       };
 
-      const manifest = {
-        ...getSnapManifest(),
-        initialPermissions,
-      };
+      const { manifest } = getSnapFiles({
+        manifest: getSnapManifest({
+          initialPermissions,
+        }),
+      });
 
       const messenger = getSnapControllerMessenger();
       const controller = getSnapController(
         getSnapControllerOptions({
           messenger,
-          detectSnapLocation: loopbackDetect({ manifest }),
+          detectSnapLocation: loopbackDetect({
+            manifest: manifest.result,
+          }),
           // eslint-disable-next-line @typescript-eslint/naming-convention
           excludedPermissions: { 'endowment:long-running': 'foobar' },
         }),
@@ -2101,16 +2133,19 @@ describe('SnapController', () => {
         ],
       };
 
-      const manifest = {
-        ...getSnapManifest(),
-        initialPermissions,
-      };
+      const { manifest } = getSnapFiles({
+        manifest: getSnapManifest({
+          initialPermissions,
+        }),
+      });
 
       const messenger = getSnapControllerMessenger();
       const snapController = getSnapController(
         getSnapControllerOptions({
           messenger,
-          detectSnapLocation: loopbackDetect({ manifest }),
+          detectSnapLocation: loopbackDetect({
+            manifest: manifest.result,
+          }),
         }),
       );
 
@@ -2256,13 +2291,16 @@ describe('SnapController', () => {
           { path: ['m', "44'", "60'"], curve: 'secp256k1' as const },
         ],
       };
+      const { manifest } = getSnapFiles({
+        manifest: getSnapManifest({
+          version: '1.1.0' as SemVerVersion,
+          initialPermissions,
+        }),
+      });
 
-      const manifest = {
-        ...getSnapManifest({ version: '1.1.0' }),
-        initialPermissions,
-      };
-
-      const detectSnapLocation = loopbackDetect({ manifest });
+      const detectSnapLocation = loopbackDetect({
+        manifest: manifest.result,
+      });
 
       const rootMessenger = getControllerMessenger();
       const messenger = getSnapControllerMessenger(rootMessenger);
@@ -2339,7 +2377,32 @@ describe('SnapController', () => {
         controller.installSnaps(MOCK_ORIGIN, {
           [snapId]: {},
         }),
-      ).rejects.toThrow('Invalid snap id. Unknown prefix. Received: "foo".');
+      ).rejects.toThrow(
+        `Invalid snap ID: Expected the value to satisfy a union of \`intersection | string\`, but received: "foo".`,
+      );
+    });
+
+    it('returns an error if an origin does not have the permission to install a snap', async () => {
+      const rootMessenger = getControllerMessenger();
+
+      rootMessenger.registerActionHandler(
+        'PermissionController:getPermissions',
+        () => ({}),
+      );
+
+      const controller = getSnapController(
+        getSnapControllerOptions({
+          messenger: getSnapControllerMessenger(rootMessenger),
+        }),
+      );
+
+      await expect(
+        controller.installSnaps(MOCK_ORIGIN, {
+          [MOCK_SNAP_ID]: {},
+        }),
+      ).rejects.toThrow(
+        `Not authorized to install snap "${MOCK_SNAP_ID}". Request the permission for the snap before attempting to install it.`,
+      );
     });
 
     it('updates a snap', async () => {
@@ -2348,15 +2411,25 @@ describe('SnapController', () => {
 
       const rootMessenger = getControllerMessenger();
       const messenger = getSnapControllerMessenger(rootMessenger);
+
+      const { manifest } = getSnapFiles({
+        manifest: getSnapManifest({
+          version: newVersion,
+        }),
+      });
+
       const detectLocationMock = jest
         .fn()
         .mockImplementationOnce(
-          () => new LoopbackLocation({ manifest: getSnapManifest() }),
+          () =>
+            new LoopbackLocation({
+              manifest: getSnapManifest(),
+            }),
         )
         .mockImplementationOnce(
           () =>
             new LoopbackLocation({
-              manifest: getSnapManifest({ version: newVersion }),
+              manifest: manifest.result,
             }),
         );
 
@@ -2367,11 +2440,6 @@ describe('SnapController', () => {
         }),
       );
 
-      rootMessenger.registerActionHandler(
-        'PermissionController:getPermissions',
-        () => ({}),
-      );
-
       await controller.installSnaps(MOCK_ORIGIN, { [MOCK_SNAP_ID]: {} });
       await controller.stopSnap(MOCK_SNAP_ID);
 
@@ -2379,12 +2447,11 @@ describe('SnapController', () => {
         [MOCK_SNAP_ID]: { version: newVersionRange },
       });
 
-      expect(messenger.call).toHaveBeenCalledTimes(12);
+      expect(messenger.call).toHaveBeenCalledTimes(11);
       expect(messenger.call).toHaveBeenNthCalledWith(
         7,
-        'PermissionController:hasPermission',
+        'PermissionController:getPermissions',
         MOCK_ORIGIN,
-        expect.anything(),
       );
 
       expect(messenger.call).toHaveBeenNthCalledWith(
@@ -2406,11 +2473,11 @@ describe('SnapController', () => {
               dappOrigin: MOCK_ORIGIN,
               origin: MOCK_SNAP_ID,
             },
-            permissions: getSnapManifest().initialPermissions,
+            permissions: {},
             snapId: MOCK_SNAP_ID,
             newVersion,
-            newPermissions: getSnapManifest().initialPermissions,
-            approvedPermissions: {},
+            newPermissions: {},
+            approvedPermissions: MOCK_SNAP_PERMISSIONS,
             unusedPermissions: {},
           },
         },
@@ -2419,33 +2486,12 @@ describe('SnapController', () => {
 
       expect(messenger.call).toHaveBeenNthCalledWith(
         10,
-        'PermissionController:grantPermissions',
-        {
-          approvedPermissions: getSnapManifest().initialPermissions,
-          subject: { origin: MOCK_SNAP_ID },
-          requestData: {
-            metadata: {
-              id: expect.any(String),
-              dappOrigin: MOCK_ORIGIN,
-              origin: MOCK_SNAP_ID,
-            },
-            snapId: MOCK_SNAP_ID,
-            newVersion,
-            newPermissions: getSnapManifest().initialPermissions,
-            approvedPermissions: {},
-            unusedPermissions: {},
-          },
-        },
-      );
-
-      expect(messenger.call).toHaveBeenNthCalledWith(
-        11,
         'ExecutionService:executeSnap',
         expect.objectContaining({}),
       );
 
       expect(messenger.call).toHaveBeenNthCalledWith(
-        12,
+        11,
         'PermissionController:hasPermission',
         MOCK_SNAP_ID,
         SnapEndowments.LongRunning,
@@ -2459,7 +2505,9 @@ describe('SnapController', () => {
       );
 
       expect(result).toStrictEqual({
-        [MOCK_SNAP_ID]: getTruncatedSnap({ version: newVersion }),
+        [MOCK_SNAP_ID]: getTruncatedSnap({
+          version: newVersion,
+        }),
       });
     });
 
@@ -2468,8 +2516,13 @@ describe('SnapController', () => {
       const newVersion = '0.9.0';
       const newVersionRange = '^0.9.0';
 
+      const { manifest } = getSnapFiles({
+        manifest: getSnapManifest({
+          version: newVersion,
+        }),
+      });
       const detect = loopbackDetect({
-        manifest: getSnapManifest({ version: newVersion }),
+        manifest: manifest.result,
       });
       const messenger = getSnapControllerMessenger();
       const controller = getSnapController(
@@ -2492,9 +2545,8 @@ describe('SnapController', () => {
 
       expect(messenger.call).toHaveBeenCalledTimes(1);
       expect(messenger.call).toHaveBeenCalledWith(
-        'PermissionController:hasPermission',
+        'PermissionController:getPermissions',
         MOCK_ORIGIN,
-        expect.anything(),
       );
       expect(detect).toHaveBeenCalledTimes(1);
       expect(detect).toHaveBeenCalledWith(
@@ -2531,9 +2583,8 @@ describe('SnapController', () => {
 
       expect(messenger.call).toHaveBeenCalledTimes(1);
       expect(messenger.call).toHaveBeenCalledWith(
-        'PermissionController:hasPermission',
+        'PermissionController:getPermissions',
         MOCK_ORIGIN,
-        expect.anything(),
       );
       expect(detect).toHaveBeenCalledTimes(1);
       expect(detect).toHaveBeenCalledWith(
@@ -2558,16 +2609,22 @@ describe('SnapController', () => {
         .mockImplementationOnce(
           () =>
             new LoopbackLocation({
-              manifest: getSnapManifest({ version: newVersion }),
+              manifest: getSnapFiles({
+                manifest: getSnapManifest({
+                  version: newVersion,
+                }),
+              }).manifest.result,
             }),
         )
         .mockImplementationOnce(
           () =>
             new LoopbackLocation({
-              manifest: getSnapManifest({
-                version: newVersion,
-                shasum: getSnapSourceShasum('foo'),
-              }),
+              manifest: getSnapFiles({
+                manifest: getSnapManifest({
+                  version: newVersion,
+                }),
+                sourceCode: 'foo',
+              }).manifest.result,
               files: [
                 new VirtualFile({
                   value: 'foo',
@@ -2619,6 +2676,11 @@ describe('SnapController', () => {
       const newVersion = '1.0.1';
       const olderVersion = '0.9.0';
 
+      const { manifest } = getSnapFiles({
+        manifest: getSnapManifest({
+          version: olderVersion,
+        }),
+      });
       const detect = jest
         .fn()
         .mockImplementationOnce(() => new LoopbackLocation())
@@ -2627,7 +2689,7 @@ describe('SnapController', () => {
         .mockImplementationOnce(
           () =>
             new LoopbackLocation({
-              manifest: getSnapManifest({ version: olderVersion }),
+              manifest: manifest.result,
             }),
         );
 
@@ -2670,25 +2732,25 @@ describe('SnapController', () => {
     });
 
     it('handles unnormalized paths correctly', async () => {
-      const manifest = getSnapManifest({
-        filePath: './bundle.js',
-        iconPath: 'icon.svg',
+      const { manifest, sourceCode, svgIcon } = getSnapFiles({
+        manifest: getSnapManifest({
+          filePath: './bundle.js',
+          iconPath: 'icon.svg',
+        }),
+        sourceCode: new VirtualFile({
+          value: DEFAULT_SNAP_BUNDLE,
+          path: 'bundle.js',
+        }),
+        svgIcon: new VirtualFile({
+          value: DEFAULT_SNAP_ICON,
+          path: 'icon.svg',
+        }),
       });
       const controller = getSnapController(
         getSnapControllerOptions({
           detectSnapLocation: loopbackDetect({
-            manifest: new VirtualFile<SnapManifest>({
-              result: manifest,
-              value: JSON.stringify(manifest),
-              path: NpmSnapFileNames.Manifest,
-            }),
-            files: [
-              new VirtualFile({
-                value: DEFAULT_SNAP_BUNDLE,
-                path: 'bundle.js',
-              }),
-              new VirtualFile({ value: DEFAULT_SNAP_ICON, path: 'icon.svg' }),
-            ],
+            manifest,
+            files: [sourceCode, svgIcon as VirtualFile],
           }),
         }),
       );
@@ -2701,15 +2763,15 @@ describe('SnapController', () => {
   });
 
   describe('updateSnap', () => {
-    it('throws an error on invalid snap id', async () => {
+    it('throws an error for non installed snap', async () => {
       const detectSnapLocation = loopbackDetect();
       await expect(async () =>
         getSnapController().updateSnap(
           MOCK_ORIGIN,
-          'local:foo',
+          MOCK_LOCAL_SNAP_ID,
           detectSnapLocation(),
         ),
-      ).rejects.toThrow('Snap "local:foo" not found');
+      ).rejects.toThrow(`Snap "${MOCK_LOCAL_SNAP_ID}" not found.`);
     });
 
     it('throws an error if the specified SemVer range is invalid', async () => {
@@ -2735,8 +2797,13 @@ describe('SnapController', () => {
     });
 
     it('throws an error if the new version of the snap is blocked', async () => {
+      const { manifest } = getSnapFiles({
+        manifest: getSnapManifest({
+          version: '1.1.0' as SemVerVersion,
+        }),
+      });
       const detectSnapLocation = loopbackDetect({
-        manifest: getSnapManifest({ version: '1.1.0' as SemVerVersion }),
+        manifest: manifest.result,
       });
       const registry = new MockSnapsRegistry();
       const controller = getSnapController(
@@ -2759,8 +2826,13 @@ describe('SnapController', () => {
     });
 
     it('does not update on older snap version downloaded', async () => {
+      const { manifest } = getSnapFiles({
+        manifest: getSnapManifest({
+          version: '0.9.0' as SemVerVersion,
+        }),
+      });
       const detectSnapLocation = loopbackDetect({
-        manifest: getSnapManifest({ version: '0.9.0' as SemVerVersion }),
+        manifest: manifest.result,
       });
       const messenger = getSnapControllerMessenger();
       const controller = getSnapController(
@@ -2795,15 +2867,18 @@ describe('SnapController', () => {
     });
 
     it('updates a snap', async () => {
+      const { manifest } = getSnapFiles({
+        manifest: getSnapManifest({
+          version: '1.1.0' as SemVerVersion,
+        }),
+      });
       const detectSnapLocation = jest
         .fn()
         .mockImplementationOnce(() => new LoopbackLocation())
         .mockImplementationOnce(
           () =>
             new LoopbackLocation({
-              manifest: getSnapManifest({
-                version: '1.1.0' as SemVerVersion,
-              }),
+              manifest: manifest.result,
             }),
         );
       const messenger = getSnapControllerMessenger();
@@ -2816,17 +2891,6 @@ describe('SnapController', () => {
       const callActionSpy = jest.spyOn(messenger, 'call');
       const onSnapUpdated = jest.fn();
       const onSnapAdded = jest.fn();
-
-      callActionSpy.mockImplementation((method, ...args): any => {
-        if (method === 'PermissionController:hasPermission') {
-          return true;
-        } else if (method === 'ApprovalController:addRequest') {
-          return (args[0] as { requestData: unknown }).requestData;
-        } else if (method === 'PermissionController:getPermissions') {
-          return {};
-        }
-        return false;
-      });
 
       await controller.installSnaps(MOCK_ORIGIN, { [MOCK_SNAP_ID]: {} });
       await controller.stopSnap(MOCK_SNAP_ID);
@@ -2858,7 +2922,7 @@ describe('SnapController', () => {
           date: expect.any(Number),
         },
       ]);
-      expect(callActionSpy).toHaveBeenCalledTimes(11);
+      expect(callActionSpy).toHaveBeenCalledTimes(10);
       expect(callActionSpy).toHaveBeenNthCalledWith(
         7,
         'PermissionController:getPermissions',
@@ -2878,11 +2942,11 @@ describe('SnapController', () => {
               dappOrigin: MOCK_ORIGIN,
               origin: MOCK_SNAP_ID,
             },
-            permissions: getSnapManifest().initialPermissions,
+            permissions: {},
             snapId: MOCK_SNAP_ID,
             newVersion: '1.1.0',
-            newPermissions: getSnapManifest().initialPermissions,
-            approvedPermissions: {},
+            newPermissions: {},
+            approvedPermissions: MOCK_SNAP_PERMISSIONS,
             unusedPermissions: {},
           },
         },
@@ -2891,33 +2955,12 @@ describe('SnapController', () => {
 
       expect(callActionSpy).toHaveBeenNthCalledWith(
         9,
-        'PermissionController:grantPermissions',
-        {
-          approvedPermissions: getSnapManifest().initialPermissions,
-          subject: { origin: MOCK_SNAP_ID },
-          requestData: {
-            metadata: {
-              id: expect.any(String),
-              dappOrigin: MOCK_ORIGIN,
-              origin: MOCK_SNAP_ID,
-            },
-            snapId: MOCK_SNAP_ID,
-            newVersion: '1.1.0',
-            newPermissions: getSnapManifest().initialPermissions,
-            approvedPermissions: {},
-            unusedPermissions: {},
-          },
-        },
-      );
-
-      expect(callActionSpy).toHaveBeenNthCalledWith(
-        10,
         'ExecutionService:executeSnap',
         expect.objectContaining({}),
       );
 
       expect(callActionSpy).toHaveBeenNthCalledWith(
-        11,
+        10,
         'PermissionController:hasPermission',
         MOCK_SNAP_ID,
         SnapEndowments.LongRunning,
@@ -2928,12 +2971,15 @@ describe('SnapController', () => {
     });
 
     it('can update crashed snap', async () => {
+      const { manifest } = getSnapFiles({
+        manifest: getSnapManifest({
+          version: '1.1.0' as SemVerVersion,
+        }),
+      });
       const detectSnapLocation = jest.fn().mockImplementation(
         () =>
           new LoopbackLocation({
-            manifest: getSnapManifest({
-              version: '1.1.0' as SemVerVersion,
-            }),
+            manifest: manifest.result,
           }),
       );
       const messenger = getSnapControllerMessenger();
@@ -2977,8 +3023,13 @@ describe('SnapController', () => {
     });
 
     it('stops and restarts a running snap during an update', async () => {
+      const { manifest } = getSnapFiles({
+        manifest: getSnapManifest({
+          version: '1.1.0' as SemVerVersion,
+        }),
+      });
       const detectSnapLocation = loopbackDetect({
-        manifest: getSnapManifest({ version: '1.1.0' as SemVerVersion }),
+        manifest: manifest.result,
       });
       const messenger = getSnapControllerMessenger();
       const controller = getSnapController(
@@ -2992,18 +3043,6 @@ describe('SnapController', () => {
       );
       const callActionSpy = jest.spyOn(messenger, 'call');
 
-      callActionSpy.mockImplementation((method, ...args): any => {
-        if (method === 'PermissionController:hasPermission') {
-          return true;
-        } else if (method === 'ApprovalController:addRequest') {
-          return (args[0] as { requestData: unknown }).requestData;
-        } else if (method === 'PermissionController:getPermissions') {
-          return {};
-        }
-
-        return false;
-      });
-
       await controller.startSnap(MOCK_SNAP_ID);
 
       const stopSnapSpy = jest.spyOn(controller as any, 'stopSnap');
@@ -3016,7 +3055,7 @@ describe('SnapController', () => {
 
       const isRunning = controller.isRunning(MOCK_SNAP_ID);
 
-      expect(callActionSpy).toHaveBeenCalledTimes(8);
+      expect(callActionSpy).toHaveBeenCalledTimes(7);
 
       expect(callActionSpy).toHaveBeenNthCalledWith(
         1,
@@ -3050,11 +3089,11 @@ describe('SnapController', () => {
               dappOrigin: MOCK_ORIGIN,
               origin: MOCK_SNAP_ID,
             },
-            permissions: getSnapManifest().initialPermissions,
+            permissions: {},
             snapId: MOCK_SNAP_ID,
             newVersion: '1.1.0',
-            newPermissions: getSnapManifest().initialPermissions,
-            approvedPermissions: {},
+            newPermissions: {},
+            approvedPermissions: MOCK_SNAP_PERMISSIONS,
             unusedPermissions: {},
           },
         },
@@ -3068,7 +3107,7 @@ describe('SnapController', () => {
       );
 
       expect(callActionSpy).toHaveBeenNthCalledWith(
-        8,
+        7,
         'PermissionController:hasPermission',
         MOCK_SNAP_ID,
         SnapEndowments.LongRunning,
@@ -3078,8 +3117,13 @@ describe('SnapController', () => {
     });
 
     it('returns null on update request denied', async () => {
+      const { manifest } = getSnapFiles({
+        manifest: getSnapManifest({
+          version: '1.1.0' as SemVerVersion,
+        }),
+      });
       const detectSnapLocation = loopbackDetect({
-        manifest: getSnapManifest({ version: '1.1.0' as SemVerVersion }),
+        manifest: manifest.result,
       });
       const messenger = getSnapControllerMessenger();
       const controller = getSnapController(
@@ -3092,6 +3136,14 @@ describe('SnapController', () => {
         }),
       );
       const callActionSpy = jest.spyOn(messenger, 'call');
+      const permissions = {
+        ...getSnapManifest().initialPermissions,
+        [SnapEndowments.Rpc]: {
+          caveats: [
+            { type: 'rpcOrigin', value: { dapps: false, snaps: true } },
+          ],
+        },
+      };
 
       callActionSpy.mockImplementation((method, ..._args: unknown[]) => {
         if (method === 'PermissionController:hasPermission') {
@@ -3131,10 +3183,10 @@ describe('SnapController', () => {
               dappOrigin: MOCK_ORIGIN,
               origin: MOCK_SNAP_ID,
             },
-            permissions: getSnapManifest().initialPermissions,
+            permissions,
             snapId: MOCK_SNAP_ID,
             newVersion: '1.1.0',
-            newPermissions: getSnapManifest().initialPermissions,
+            newPermissions: permissions,
             approvedPermissions: {},
             unusedPermissions: {},
           },
@@ -3171,6 +3223,22 @@ describe('SnapController', () => {
         },
       };
 
+      const { manifest } = getSnapFiles({
+        manifest: getSnapManifest({
+          initialPermissions,
+        }),
+      });
+
+      const { manifest: manifest2 } = getSnapFiles({
+        manifest: getSnapManifest({
+          version: '1.1.0' as SemVerRange,
+          initialPermissions: {
+            snap_confirm: {},
+            'endowment:network-access': {},
+          },
+        }),
+      });
+
       const callActionSpy = jest.spyOn(messenger, 'call');
 
       const detect = jest
@@ -3178,19 +3246,13 @@ describe('SnapController', () => {
         .mockImplementationOnce(
           () =>
             new LoopbackLocation({
-              manifest: getSnapManifest({ initialPermissions }),
+              manifest: manifest.result,
             }),
         )
         .mockImplementationOnce(
           () =>
             new LoopbackLocation({
-              manifest: getSnapManifest({
-                version: '1.1.0' as SemVerRange,
-                initialPermissions: {
-                  snap_confirm: {},
-                  'endowment:network-access': {},
-                },
-              }),
+              manifest: manifest2.result,
             }),
         );
 
@@ -3204,6 +3266,9 @@ describe('SnapController', () => {
         } else if (method === 'ApprovalController:addRequest') {
           return (args[0] as { requestData: unknown }).requestData;
         } else if (method === 'PermissionController:getPermissions') {
+          if (args[0] === MOCK_ORIGIN) {
+            return MOCK_ORIGIN_PERMISSIONS;
+          }
           return approvedPermissions;
         } else if (
           method === 'PermissionController:revokePermissions' ||
@@ -3334,19 +3399,23 @@ describe('SnapController', () => {
         .mockImplementationOnce(
           () =>
             new LoopbackLocation({
-              manifest: getSnapManifest({ initialPermissions }),
+              manifest: getSnapFiles({
+                manifest: getSnapManifest({ initialPermissions }),
+              }).manifest.result,
             }),
         )
         .mockImplementationOnce(
           () =>
             new LoopbackLocation({
-              manifest: getSnapManifest({
-                version: '1.1.0' as SemVerRange,
-                initialPermissions: {
-                  snap_confirm: {},
-                  'endowment:network-access': {},
-                },
-              }),
+              manifest: getSnapFiles({
+                manifest: getSnapManifest({
+                  version: '1.1.0' as SemVerRange,
+                  initialPermissions: {
+                    snap_confirm: {},
+                    'endowment:network-access': {},
+                  },
+                }),
+              }).manifest.result,
             }),
         );
       const callActionSpy = jest.spyOn(messenger, 'call');
@@ -3369,6 +3438,9 @@ describe('SnapController', () => {
           expect(request.id).toBe(request.requestData.metadata.id);
           return request.requestData;
         } else if (method === 'PermissionController:getPermissions') {
+          if (args[0] === MOCK_ORIGIN) {
+            return MOCK_ORIGIN_PERMISSIONS;
+          }
           return approvedPermissions;
         } else if (
           method === 'PermissionController:revokePermissions' ||
@@ -3384,12 +3456,15 @@ describe('SnapController', () => {
     });
 
     it('handles unnormalized paths correctly', async () => {
-      const detectSnapLocation = loopbackDetect({
+      const { manifest } = getSnapFiles({
         manifest: getSnapManifest({
           version: '1.2.0' as SemVerVersion,
           filePath: './dist/bundle.js',
           iconPath: './images/icon.svg',
         }),
+      });
+      const detectSnapLocation = loopbackDetect({
+        manifest: manifest.result,
       });
       const messenger = getSnapControllerMessenger();
       const controller = getSnapController(
@@ -3410,6 +3485,105 @@ describe('SnapController', () => {
 
       const newSnap = controller.get(MOCK_SNAP_ID);
       expect(newSnap?.version).toBe('1.2.0');
+    });
+  });
+
+  describe('removeSnap', () => {
+    it('will remove the "wallet_snap" permission from a subject that no longer has any permitted snaps', async () => {
+      const messenger = getSnapControllerMessenger();
+      const snapController = getSnapController(
+        getSnapControllerOptions({
+          messenger,
+          state: {
+            snaps: getPersistedSnapsState(),
+          },
+        }),
+      );
+
+      const permissions = {
+        [WALLET_SNAP_PERMISSION_KEY]: {
+          ...MOCK_WALLET_SNAP_PERMISSION,
+          caveats: [
+            {
+              type: SnapCaveatType.SnapIds,
+              value: {
+                [MOCK_SNAP_ID]: {},
+              },
+            },
+          ],
+        },
+      };
+
+      const callActionSpy = jest.spyOn(messenger, 'call');
+      callActionSpy.mockImplementation((method, ..._args): any => {
+        if (method === 'PermissionController:getSubjectNames') {
+          return [MOCK_ORIGIN];
+        } else if (method === 'PermissionController:getPermissions') {
+          return permissions;
+        }
+        return undefined;
+      });
+
+      await snapController.removeSnap(MOCK_SNAP_ID);
+      expect(callActionSpy).toHaveBeenCalledTimes(4);
+      expect(callActionSpy).toHaveBeenNthCalledWith(
+        4,
+        'PermissionController:revokePermissions',
+        {
+          [MOCK_ORIGIN]: [WALLET_SNAP_PERMISSION_KEY],
+        },
+      );
+    });
+
+    it('will update the "wallet_snap" permission from a subject that has one or more permitted snaps', async () => {
+      const messenger = getSnapControllerMessenger();
+      const snapController = getSnapController(
+        getSnapControllerOptions({
+          messenger,
+          state: {
+            snaps: getPersistedSnapsState(
+              getPersistedSnapObject(),
+              getPersistedSnapObject({ id: `${MOCK_SNAP_ID}2` }),
+            ),
+          },
+        }),
+      );
+
+      const permissions = {
+        [WALLET_SNAP_PERMISSION_KEY]: {
+          ...MOCK_WALLET_SNAP_PERMISSION,
+          caveats: [
+            {
+              type: SnapCaveatType.SnapIds,
+              value: {
+                [MOCK_SNAP_ID]: {},
+                [`${MOCK_SNAP_ID}2`]: {},
+              },
+            },
+          ],
+        },
+      };
+
+      const callActionSpy = jest.spyOn(messenger, 'call');
+      callActionSpy.mockImplementation((method, ..._args): any => {
+        if (method === 'PermissionController:getSubjectNames') {
+          return [MOCK_ORIGIN];
+        } else if (method === 'PermissionController:getPermissions') {
+          return permissions;
+        }
+        return undefined;
+      });
+
+      await snapController.removeSnap(MOCK_SNAP_ID);
+      expect(callActionSpy).toHaveBeenCalledTimes(4);
+      expect(callActionSpy).toHaveBeenNthCalledWith(
+        4,
+        'PermissionController:updateCaveat',
+        MOCK_ORIGIN,
+        WALLET_SNAP_PERMISSION_KEY,
+        SnapCaveatType.SnapIds,
+        { [`${MOCK_SNAP_ID}2`]: {} },
+      );
     });
   });
 
@@ -3743,6 +3917,38 @@ describe('SnapController', () => {
     });
   });
 
+  describe('getRegistryMetadata', () => {
+    it('returns the metadata for a verified snap', async () => {
+      const registry = new MockSnapsRegistry();
+      registry.getMetadata.mockReturnValue({
+        name: 'Mock Snap',
+      });
+
+      const snapController = getSnapController(
+        getSnapControllerOptions({
+          registry,
+        }),
+      );
+
+      expect(
+        await snapController.getRegistryMetadata(MOCK_SNAP_ID),
+      ).toStrictEqual({
+        name: 'Mock Snap',
+      });
+    });
+
+    it('returns null for a non-verified snap', async () => {
+      const registry = new MockSnapsRegistry();
+      const snapController = getSnapController(
+        getSnapControllerOptions({
+          registry,
+        }),
+      );
+
+      expect(await snapController.getRegistryMetadata(MOCK_SNAP_ID)).toBeNull();
+    });
+  });
+
   describe('SnapController actions', () => {
     describe('SnapController:get', () => {
       it('gets a snap', () => {
@@ -3863,7 +4069,6 @@ describe('SnapController', () => {
           state: {
             snaps: getPersistedSnapsState(
               getPersistedSnapObject({
-                permissionName: 'fooperm',
                 version: '0.0.1',
                 sourceCode: DEFAULT_SNAP_BUNDLE,
                 id: 'npm:fooSnap',
@@ -4035,19 +4240,6 @@ describe('SnapController', () => {
           origin: MOCK_ORIGIN,
         });
 
-        rootMessenger.registerActionHandler(
-          'PermissionController:getPermissions',
-          () => ({
-            [`wallet_snap_${MOCK_SNAP_ID}`]: {
-              caveats: null,
-              date: 1661166080905,
-              id: 'VyAsBJiDDKawv_XlNcm13',
-              invoker: 'https://metamask.github.io',
-              parentCapability: `wallet_snap_${MOCK_SNAP_ID}`,
-            },
-          }),
-        );
-
         getSnapController(
           getSnapControllerOptions({
             messenger,
@@ -4125,6 +4317,33 @@ describe('SnapController', () => {
 
         messenger.call('SnapController:removeSnapError', 'foo');
         expect(snapController.state.snapErrors.foo).toBeUndefined();
+      });
+    });
+
+    describe('SnapController:getRegistryMetadata', () => {
+      it('calls SnapController.getRegistryMetadata()', async () => {
+        const messenger = getSnapControllerMessenger();
+        const registry = new MockSnapsRegistry();
+
+        registry.getMetadata.mockReturnValue({
+          name: 'Mock Snap',
+        });
+
+        getSnapController(
+          getSnapControllerOptions({
+            messenger,
+            registry,
+          }),
+        );
+
+        expect(
+          await messenger.call(
+            'SnapController:getRegistryMetadata',
+            MOCK_SNAP_ID,
+          ),
+        ).toStrictEqual({
+          name: 'Mock Snap',
+        });
       });
     });
   });
