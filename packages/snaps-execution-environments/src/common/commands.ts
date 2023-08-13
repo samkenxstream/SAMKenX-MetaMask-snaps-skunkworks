@@ -1,15 +1,15 @@
 import { HandlerType } from '@metamask/snaps-utils';
 import { assertExhaustive } from '@metamask/utils';
 
-import { InvokeSnap, InvokeSnapArgs } from './BaseSnapExecutor';
-import {
-  assertIsOnTransactionRequestArguments,
+import type { InvokeSnap, InvokeSnapArgs } from './BaseSnapExecutor';
+import type {
   ExecuteSnap,
   JsonRpcRequestWithoutId,
   Ping,
   SnapRpc,
   Terminate,
 } from './validation';
+import { assertIsOnTransactionRequestArguments } from './validation';
 
 export type CommandMethodsMapping = {
   ping: Ping;
@@ -46,10 +46,11 @@ export function getHandlerArguments(
     }
 
     case HandlerType.OnRpcRequest:
-    case HandlerType.SnapKeyring:
       return { origin, request };
 
     case HandlerType.OnCronjob:
+    case HandlerType.OnInstall:
+    case HandlerType.OnUpdate:
       return { request };
 
     default:
@@ -80,8 +81,8 @@ export function getCommandMethodImplementations(
       return Promise.resolve('OK');
     },
 
-    executeSnap: async (snapName, sourceCode, endowments) => {
-      await startSnap(snapName, sourceCode, endowments);
+    executeSnap: async (snapId, sourceCode, endowments) => {
+      await startSnap(snapId, sourceCode, endowments);
       return 'OK';
     },
 

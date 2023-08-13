@@ -1,37 +1,28 @@
-import { PermissionConstraint } from '@metamask/permission-controller';
-import { Json } from '@metamask/utils';
-
-import { dialogBuilder, DialogMethodHooks } from './dialog';
-import {
-  getBip32EntropyBuilder,
-  getBip32EntropyCaveatMapper,
-  getBip32EntropyCaveatSpecifications,
-  GetBip32EntropyMethodHooks,
-} from './getBip32Entropy';
-import {
-  getBip32PublicKeyBuilder,
-  GetBip32PublicKeyMethodHooks,
-} from './getBip32PublicKey';
-import {
-  getBip44EntropyBuilder,
-  getBip44EntropyCaveatMapper,
-  getBip44EntropyCaveatSpecifications,
-  GetBip44EntropyMethodHooks,
-} from './getBip44Entropy';
-import { getEntropyBuilder, GetEntropyHooks } from './getEntropy';
-import {
-  InvokeSnapCaveatSpecifications,
-  invokeSnapBuilder,
-  InvokeSnapMethodHooks,
-} from './invokeSnap';
-import { manageStateBuilder, ManageStateMethodHooks } from './manageState';
-import { notifyBuilder, NotifyMethodHooks } from './notify';
+import type { DialogMethodHooks } from './dialog';
+import { dialogBuilder } from './dialog';
+import type { GetBip32EntropyMethodHooks } from './getBip32Entropy';
+import { getBip32EntropyBuilder } from './getBip32Entropy';
+import type { GetBip32PublicKeyMethodHooks } from './getBip32PublicKey';
+import { getBip32PublicKeyBuilder } from './getBip32PublicKey';
+import type { GetBip44EntropyMethodHooks } from './getBip44Entropy';
+import { getBip44EntropyBuilder } from './getBip44Entropy';
+import type { GetEntropyHooks } from './getEntropy';
+import { getEntropyBuilder } from './getEntropy';
+import type { InvokeSnapMethodHooks } from './invokeSnap';
+import { invokeSnapBuilder } from './invokeSnap';
+import type { ManageAccountsMethodHooks } from './manageAccounts';
+import { manageAccountsBuilder } from './manageAccounts';
+import type { ManageStateMethodHooks } from './manageState';
+import { manageStateBuilder } from './manageState';
+import type { NotifyMethodHooks } from './notify';
+import { notifyBuilder } from './notify';
 
 export type { DialogParameters } from './dialog';
 export { DialogType } from './dialog';
 export { ManageStateOperation } from './manageState';
 export { WALLET_SNAP_PERMISSION_KEY } from './invokeSnap';
-export type { NotificationArgs, NotificationType } from './notify';
+export type { NotificationArgs } from './notify';
+export { NotificationType } from './notify';
 
 export type RestrictedMethodHooks = DialogMethodHooks &
   GetBip32EntropyMethodHooks &
@@ -40,30 +31,19 @@ export type RestrictedMethodHooks = DialogMethodHooks &
   GetEntropyHooks &
   InvokeSnapMethodHooks &
   ManageStateMethodHooks &
-  NotifyMethodHooks;
+  NotifyMethodHooks &
+  ManageAccountsMethodHooks;
 
 export const restrictedMethodPermissionBuilders = {
-  [dialogBuilder.targetKey]: dialogBuilder,
-  [getBip32EntropyBuilder.targetKey]: getBip32EntropyBuilder,
-  [getBip32PublicKeyBuilder.targetKey]: getBip32PublicKeyBuilder,
-  [getBip44EntropyBuilder.targetKey]: getBip44EntropyBuilder,
-  [getEntropyBuilder.targetKey]: getEntropyBuilder,
-  [invokeSnapBuilder.targetKey]: invokeSnapBuilder,
-  [manageStateBuilder.targetKey]: manageStateBuilder,
-  [notifyBuilder.targetKey]: notifyBuilder,
+  [dialogBuilder.targetName]: dialogBuilder,
+  [getBip32EntropyBuilder.targetName]: getBip32EntropyBuilder,
+  [getBip32PublicKeyBuilder.targetName]: getBip32PublicKeyBuilder,
+  [getBip44EntropyBuilder.targetName]: getBip44EntropyBuilder,
+  [getEntropyBuilder.targetName]: getEntropyBuilder,
+  [invokeSnapBuilder.targetName]: invokeSnapBuilder,
+  [manageStateBuilder.targetName]: manageStateBuilder,
+  [notifyBuilder.targetName]: notifyBuilder,
+  [manageAccountsBuilder.targetName]: manageAccountsBuilder,
 } as const;
 
-export const caveatSpecifications = {
-  ...getBip32EntropyCaveatSpecifications,
-  ...getBip44EntropyCaveatSpecifications,
-  ...InvokeSnapCaveatSpecifications,
-} as const;
-
-export const caveatMappers: Record<
-  string,
-  (value: Json) => Pick<PermissionConstraint, 'caveats'>
-> = {
-  [getBip32EntropyBuilder.targetKey]: getBip32EntropyCaveatMapper,
-  [getBip32PublicKeyBuilder.targetKey]: getBip32EntropyCaveatMapper,
-  [getBip44EntropyBuilder.targetKey]: getBip44EntropyCaveatMapper,
-};
+export * from './caveats';

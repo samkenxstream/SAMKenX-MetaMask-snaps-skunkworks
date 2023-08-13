@@ -1,6 +1,6 @@
-import { PermissionConstraint } from '@metamask/permission-controller';
+import type { PermissionConstraint } from '@metamask/permission-controller';
 import { HandlerType } from '@metamask/snaps-utils';
-import { Json } from '@metamask/utils';
+import type { Json } from '@metamask/utils';
 
 import {
   cronjobCaveatSpecifications,
@@ -8,11 +8,7 @@ import {
   getCronjobCaveatMapper,
 } from './cronjob';
 import { ethereumProviderEndowmentBuilder } from './ethereum-provider';
-import {
-  keyringEndowmentBuilder,
-  keyringCaveatSpecifications,
-  getKeyringCaveatMapper,
-} from './keyring';
+import { lifecycleHooksEndowmentBuilder } from './lifecycle-hooks';
 import { longRunningEndowmentBuilder } from './long-running';
 import { networkAccessEndowmentBuilder } from './network-access';
 import {
@@ -28,20 +24,19 @@ import {
 import { webAssemblyEndowmentBuilder } from './web-assembly';
 
 export const endowmentPermissionBuilders = {
-  [networkAccessEndowmentBuilder.targetKey]: networkAccessEndowmentBuilder,
-  [longRunningEndowmentBuilder.targetKey]: longRunningEndowmentBuilder,
-  [transactionInsightEndowmentBuilder.targetKey]:
+  [networkAccessEndowmentBuilder.targetName]: networkAccessEndowmentBuilder,
+  [longRunningEndowmentBuilder.targetName]: longRunningEndowmentBuilder,
+  [transactionInsightEndowmentBuilder.targetName]:
     transactionInsightEndowmentBuilder,
-  [keyringEndowmentBuilder.targetKey]: keyringEndowmentBuilder,
-  [cronjobEndowmentBuilder.targetKey]: cronjobEndowmentBuilder,
-  [ethereumProviderEndowmentBuilder.targetKey]:
+  [cronjobEndowmentBuilder.targetName]: cronjobEndowmentBuilder,
+  [ethereumProviderEndowmentBuilder.targetName]:
     ethereumProviderEndowmentBuilder,
-  [rpcEndowmentBuilder.targetKey]: rpcEndowmentBuilder,
-  [webAssemblyEndowmentBuilder.targetKey]: webAssemblyEndowmentBuilder,
+  [rpcEndowmentBuilder.targetName]: rpcEndowmentBuilder,
+  [webAssemblyEndowmentBuilder.targetName]: webAssemblyEndowmentBuilder,
+  [lifecycleHooksEndowmentBuilder.targetName]: lifecycleHooksEndowmentBuilder,
 } as const;
 
 export const endowmentCaveatSpecifications = {
-  ...keyringCaveatSpecifications,
   ...cronjobCaveatSpecifications,
   ...transactionInsightCaveatSpecifications,
   ...rpcCaveatSpecifications,
@@ -51,19 +46,20 @@ export const endowmentCaveatMappers: Record<
   string,
   (value: Json) => Pick<PermissionConstraint, 'caveats'>
 > = {
-  [keyringEndowmentBuilder.targetKey]: getKeyringCaveatMapper,
-  [cronjobEndowmentBuilder.targetKey]: getCronjobCaveatMapper,
-  [transactionInsightEndowmentBuilder.targetKey]:
+  [cronjobEndowmentBuilder.targetName]: getCronjobCaveatMapper,
+  [transactionInsightEndowmentBuilder.targetName]:
     getTransactionInsightCaveatMapper,
-  [rpcEndowmentBuilder.targetKey]: getRpcCaveatMapper,
+  [rpcEndowmentBuilder.targetName]: getRpcCaveatMapper,
 };
 
 export const handlerEndowments: Record<HandlerType, string> = {
-  [HandlerType.OnRpcRequest]: rpcEndowmentBuilder.targetKey,
-  [HandlerType.SnapKeyring]: keyringEndowmentBuilder.targetKey,
-  [HandlerType.OnTransaction]: transactionInsightEndowmentBuilder.targetKey,
-  [HandlerType.OnCronjob]: cronjobEndowmentBuilder.targetKey,
+  [HandlerType.OnRpcRequest]: rpcEndowmentBuilder.targetName,
+  [HandlerType.OnTransaction]: transactionInsightEndowmentBuilder.targetName,
+  [HandlerType.OnCronjob]: cronjobEndowmentBuilder.targetName,
+  [HandlerType.OnInstall]: lifecycleHooksEndowmentBuilder.targetName,
+  [HandlerType.OnUpdate]: lifecycleHooksEndowmentBuilder.targetName,
 };
 
 export * from './enum';
+export { getRpcCaveatOrigins } from './rpc';
 export { getTransactionOriginCaveat } from './transaction-insight';

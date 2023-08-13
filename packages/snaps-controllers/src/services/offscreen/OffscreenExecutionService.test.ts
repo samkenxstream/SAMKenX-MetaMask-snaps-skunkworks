@@ -1,18 +1,14 @@
-import { OffscreenExecutionService } from '@metamask/snaps-controllers';
 import { createService } from '@metamask/snaps-controllers/test-utils';
 import {
   DEFAULT_SNAP_BUNDLE,
   MOCK_LOCAL_SNAP_ID,
   MOCK_SNAP_ID,
 } from '@metamask/snaps-utils/test-utils';
-import {
-  isJsonRpcRequest,
-  isPlainObject,
-  Json,
-  JsonRpcRequest,
-} from '@metamask/utils';
+import type { Json, JsonRpcRequest } from '@metamask/utils';
+import { isJsonRpcRequest, isPlainObject } from '@metamask/utils';
 
 import { getMockedFunction } from '../../test-utils/mock';
+import { OffscreenExecutionService } from './OffscreenExecutionService';
 
 const DOCUMENT_URL = new URL('https://foo');
 const FRAME_URL = new URL('https://bar');
@@ -126,7 +122,9 @@ describe('OffscreenExecutionService', () => {
       frameUrl: FRAME_URL,
     });
 
-    const hasDocument = getMockedFunction(chrome.offscreen.hasDocument);
+    const hasDocument = chrome.offscreen.hasDocument as jest.MockedFunction<
+      () => Promise<boolean>
+    >;
     const createDocument = getMockedFunction(chrome.offscreen.createDocument);
 
     hasDocument.mockResolvedValueOnce(false).mockResolvedValue(true);

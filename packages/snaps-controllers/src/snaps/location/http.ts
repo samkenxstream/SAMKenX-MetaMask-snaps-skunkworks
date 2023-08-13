@@ -1,14 +1,15 @@
+import type { SnapManifest } from '@metamask/snaps-utils';
 import {
-  SnapManifest,
   VirtualFile,
   HttpSnapIdStruct,
   NpmSnapFileNames,
   createSnapManifest,
   normalizeRelative,
+  parseJson,
 } from '@metamask/snaps-utils';
 import { assert, assertStruct } from '@metamask/utils';
 
-import { SnapLocation } from './location';
+import type { SnapLocation } from './location';
 
 export interface HttpOptions {
   /**
@@ -63,7 +64,7 @@ export class HttpLocation implements SnapLocation {
       );
     }
     const contents = await response.text();
-    const manifest = JSON.parse(contents);
+    const manifest = parseJson(contents);
     const vfile = new VirtualFile<SnapManifest>({
       value: contents,
       result: createSnapManifest(manifest),

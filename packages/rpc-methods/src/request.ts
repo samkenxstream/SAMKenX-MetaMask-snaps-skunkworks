@@ -1,13 +1,13 @@
-import {
+import type {
   PermissionSpecificationBuilder,
   PermissionType,
   RestrictedMethodOptions,
 } from '@metamask/permission-controller';
-import { PermittedHandlerExport } from '@metamask/types';
-import { JsonRpcParams } from '@metamask/utils';
+import type { PermittedHandlerExport } from '@metamask/types';
+import type { JsonRpcParams } from '@metamask/utils';
 
-import { methodHandlers } from './permitted';
-import { restrictedMethodPermissionBuilders } from './restricted';
+import type { methodHandlers } from './permitted';
+import type { restrictedMethodPermissionBuilders } from './restricted';
 
 /**
  * Get the method implementation from a {@link PermittedHandlerExport}.
@@ -56,12 +56,12 @@ type RestrictedMethodImplementation<Builder> = Builder extends {
  *
  * @template Builder - A permission specification builder.
  */
-type RestrictedMethod<Builder extends { targetKey: string }> =
+type RestrictedMethod<Builder extends { targetName: string }> =
   RestrictedMethodImplementation<Builder> extends (
     args: infer Args,
   ) => infer Return
     ? Args extends RestrictedMethodOptions<infer Params>
-      ? (args: { method: Builder['targetKey']; params?: Params }) => Return
+      ? (args: { method: Builder['targetName']; params?: Params }) => Return
       : never
     : never;
 

@@ -1,27 +1,29 @@
-import {
+import type {
   PermissionSpecificationBuilder,
-  PermissionType,
   RestrictedMethodOptions,
   ValidPermissionSpecification,
 } from '@metamask/permission-controller';
-import { Component, ComponentStruct } from '@metamask/snaps-ui';
-import { NonEmptyArray } from '@metamask/utils';
+import { PermissionType, SubjectType } from '@metamask/permission-controller';
+import type { Component } from '@metamask/snaps-ui';
+import { ComponentStruct } from '@metamask/snaps-ui';
+import type { EnumToUnion } from '@metamask/snaps-utils';
+import { enumValue } from '@metamask/snaps-utils';
+import type { NonEmptyArray } from '@metamask/utils';
 import { ethErrors } from 'eth-rpc-errors';
+import type { Infer, Struct } from 'superstruct';
 import {
   create,
   enums,
-  Infer,
   object,
   optional,
   size,
   string,
-  Struct,
   StructError,
   type,
   union,
 } from 'superstruct';
 
-import { EnumToUnion, enumValue } from '../utils';
+import type { MethodHooksObject } from '../utils';
 
 const methodName = 'snap_dialog';
 
@@ -59,7 +61,7 @@ type DialogSpecificationBuilderOptions = {
 
 type DialogSpecification = ValidPermissionSpecification<{
   permissionType: PermissionType.RestrictedMethod;
-  targetKey: typeof methodName;
+  targetName: typeof methodName;
   methodImplementation: ReturnType<typeof getDialogImplementation>;
   allowedCaveats: Readonly<NonEmptyArray<string>> | null;
 }>;
@@ -88,18 +90,21 @@ const specificationBuilder: PermissionSpecificationBuilder<
 }: DialogSpecificationBuilderOptions) => {
   return {
     permissionType: PermissionType.RestrictedMethod,
-    targetKey: methodName,
+    targetName: methodName,
     allowedCaveats,
     methodImplementation: getDialogImplementation(methodHooks),
+    subjectTypes: [SubjectType.Snap],
   };
 };
 
+const methodHooks: MethodHooksObject<DialogMethodHooks> = {
+  showDialog: true,
+};
+
 export const dialogBuilder = Object.freeze({
-  targetKey: methodName,
+  targetName: methodName,
   specificationBuilder,
-  methodHooks: {
-    showDialog: true,
-  },
+  methodHooks,
 } as const);
 
 // Note: We use `type` here instead of `object` because `type` does not validate

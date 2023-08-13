@@ -3,8 +3,9 @@ import 'ses/lockdown';
 
 import { readFileSync } from 'fs';
 
+import type { HandlerType } from './handlers';
 import { generateMockEndowments } from './mock';
-import { HandlerType, SNAP_EXPORT_NAMES } from './types';
+import { SNAP_EXPORT_NAMES } from './types';
 
 declare let lockdown: any, Compartment: any;
 
@@ -15,13 +16,10 @@ lockdown({
   dateTaming: 'unsafe',
   overrideTaming: 'severe',
 
-  // TODO: See if there's an easier way to do this. This file is ran in a
-  // separate process, so we can't mock SES with Jest.
-  ...(process.env.NODE_ENV === 'test'
-    ? {
-        domainTaming: 'unsafe',
-      }
-    : {}),
+  // We disable domain taming, because it does not work in certain cases when
+  // running tests. This is unlikely to be a problem in production, because
+  // Node.js domains are deprecated.
+  domainTaming: 'unsafe',
 });
 
 /**

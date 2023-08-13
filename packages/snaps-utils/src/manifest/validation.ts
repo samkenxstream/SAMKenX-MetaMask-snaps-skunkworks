@@ -1,10 +1,16 @@
-import { assertStruct, ChecksumStruct, VersionStruct } from '@metamask/utils';
+import { isValidBIP32PathSegment } from '@metamask/key-tree';
+import {
+  assertStruct,
+  ChecksumStruct,
+  VersionStruct,
+  isValidSemVerRange,
+} from '@metamask/utils';
+import type { Infer, Struct } from 'superstruct';
 import {
   array,
   boolean,
   create,
   enums,
-  Infer,
   integer,
   is,
   literal,
@@ -12,17 +18,18 @@ import {
   optional,
   pattern,
   refine,
+  record,
   size,
   string,
-  Struct,
   type,
   union,
 } from 'superstruct';
 
+import { isEqual } from '../array';
 import { CronjobSpecificationArrayStruct } from '../cronjob';
 import { SIP_6_MAGIC_VALUE, STATE_ENCRYPTION_MAGIC_VALUE } from '../entropy';
 import { RpcOriginsStruct } from '../json-rpc';
-import { NamespacesStruct } from '../namespace';
+import { SnapIdStruct } from '../snaps';
 import { NameStruct, NpmSnapFileNames } from '../types';
 
 // BIP-43 purposes that cannot be used for entropy derivation. These are in the
@@ -32,11 +39,17 @@ const FORBIDDEN_PURPOSES: string[] = [
   STATE_ENCRYPTION_MAGIC_VALUE,
 ];
 
-const BIP32_INDEX_REGEX = /^\d+'?$/u;
+export const FORBIDDEN_COIN_TYPES: number[] = [60];
+const FORBIDDEN_PATHS: string[][] = FORBIDDEN_COIN_TYPES.map((coinType) => [
+  'm',
+  "44'",
+  `${coinType}'`,
+]);
+
 export const Bip32PathStruct = refine(
   array(string()),
   'BIP-32 path',
-  (path) => {
+  (path: string[]) => {
     if (path.length === 0) {
       return 'Path must be a non-empty BIP-32 derivation path array';
     }
@@ -49,7 +62,7 @@ export const Bip32PathStruct = refine(
       return 'Paths must have a length of at least three.';
     }
 
-    if (path.slice(1).some((part) => !BIP32_INDEX_REGEX.test(part))) {
+    if (path.slice(1).some((part) => !isValidBIP32PathSegment(part))) {
       return 'Path must be a valid BIP-32 derivation path array.';
     }
 
@@ -57,12 +70,25 @@ export const Bip32PathStruct = refine(
       return `The purpose "${path[1]}" is not allowed for entropy derivation.`;
     }
 
+    if (
+      FORBIDDEN_PATHS.some((forbiddenPath) =>
+        isEqual(path.slice(0, forbiddenPath.length), forbiddenPath),
+      )
+    ) {
+      return `The path "${path.join(
+        '/',
+      )}" is not allowed for entropy derivation.`;
+    }
+
     return true;
   },
 );
 
-export const bip32entropy = <T extends { path: string[]; curve: string }, S>(
-  struct: Struct<T, S>,
+export const bip32entropy = <
+  Type extends { path: string[]; curve: string },
+  Schema,
+>(
+  struct: Struct<Type, Schema>,
 ) =>
   refine(struct, 'BIP-32 entropy', (value) => {
     if (
@@ -91,6 +117,27 @@ export const SnapGetBip32EntropyPermissionsStruct = size(
   Infinity,
 );
 
+export const SemVerRangeStruct = refine(string(), 'SemVer range', (value) => {
+  if (isValidSemVerRange(value)) {
+    return true;
+  }
+  return 'Expected a valid SemVer range.';
+});
+
+export const SnapIdsStruct = refine(
+  record(SnapIdStruct, object({ version: optional(SemVerRangeStruct) })),
+  'SnapIds',
+  (value) => {
+    if (Object.keys(value).length === 0) {
+      return false;
+    }
+
+    return true;
+  },
+);
+
+export type SnapIds = Infer<typeof SnapIdsStruct>;
+
 /* eslint-disable @typescript-eslint/naming-convention */
 export const PermissionsStruct = type({
   'endowment:long-running': optional(object({})),
@@ -105,8 +152,11 @@ export const PermissionsStruct = type({
     object({ jobs: CronjobSpecificationArrayStruct }),
   ),
   'endowment:rpc': optional(RpcOriginsStruct),
+  snap_dialog: optional(object({})),
+  // TODO: Remove
   snap_confirm: optional(object({})),
   snap_manageState: optional(object({})),
+  snap_manageAccounts: optional(object({})),
   snap_notify: optional(object({})),
   snap_getBip32Entropy: optional(SnapGetBip32EntropyPermissionsStruct),
   snap_getBip32PublicKey: optional(SnapGetBip32EntropyPermissionsStruct),
@@ -118,11 +168,7 @@ export const PermissionsStruct = type({
     ),
   ),
   snap_getEntropy: optional(object({})),
-  'endowment:keyring': optional(
-    object({
-      namespaces: NamespacesStruct,
-    }),
-  ),
+  wallet_snap: optional(SnapIdsStruct),
 });
 /* eslint-enable @typescript-eslint/naming-convention */
 
@@ -161,6 +207,7 @@ export const SnapManifestStruct = object({
   }),
   initialPermissions: PermissionsStruct,
   manifestVersion: literal('0.1'),
+  $schema: optional(string()), // enables JSON-Schema linting in VSC and other IDEs
 });
 
 export type SnapManifest = Infer<typeof SnapManifestStruct>;
@@ -193,7 +240,6 @@ export function assertIsSnapManifest(
 
 /**
  * Creates a {@link SnapManifest} object from JSON.
- *
  *
  * @param value - The value to check.
  * @throws If the value cannot be coerced to a {@link SnapManifest} object.

@@ -1,37 +1,30 @@
-import {
+import type {
   Caveat,
   CaveatSpecificationConstraint,
   EndowmentGetterParams,
   PermissionConstraint,
   PermissionSpecificationBuilder,
-  PermissionType,
   PermissionValidatorConstraint,
   ValidPermissionSpecification,
 } from '@metamask/permission-controller';
-import {
-  assertIsRpcOrigins,
-  RpcOrigins,
-  SnapCaveatType,
-} from '@metamask/snaps-utils';
-import {
-  hasProperty,
-  isPlainObject,
-  Json,
-  NonEmptyArray,
-  assert,
-} from '@metamask/utils';
+import { PermissionType, SubjectType } from '@metamask/permission-controller';
+import type { RpcOrigins } from '@metamask/snaps-utils';
+import { assertIsRpcOrigins, SnapCaveatType } from '@metamask/snaps-utils';
+import type { Json, NonEmptyArray } from '@metamask/utils';
+import { hasProperty, isPlainObject, assert } from '@metamask/utils';
 import { ethErrors } from 'eth-rpc-errors';
 
 import { SnapEndowments } from './enum';
 
-const targetKey = SnapEndowments.Rpc;
+const targetName = SnapEndowments.Rpc;
 
 type RpcSpecification = ValidPermissionSpecification<{
   permissionType: PermissionType.Endowment;
-  targetKey: typeof targetKey;
+  targetName: typeof targetName;
   endowmentGetter: (_options?: any) => undefined;
   allowedCaveats: Readonly<NonEmptyArray<string>> | null;
   validator: PermissionValidatorConstraint;
+  subjectTypes: readonly SubjectType[];
 }>;
 
 type RpcSpecificationBuilderOptions = {
@@ -41,16 +34,17 @@ type RpcSpecificationBuilderOptions = {
 /**
  * The specification builder for the JSON-RPC endowment permission.
  *
+ * @param _builderOptions - Optional specification builder options.
  * @returns The specification for the JSON-RPC endowment permission.
  */
 const specificationBuilder: PermissionSpecificationBuilder<
   PermissionType.Endowment,
   RpcSpecificationBuilderOptions,
   RpcSpecification
-> = (): RpcSpecification => {
+> = (_builderOptions?: any): RpcSpecification => {
   return {
     permissionType: PermissionType.Endowment,
-    targetKey,
+    targetName,
     allowedCaveats: [SnapCaveatType.RpcOrigin],
     endowmentGetter: (_getterOptions?: EndowmentGetterParams) => undefined,
     validator: ({ caveats }) => {
@@ -63,11 +57,12 @@ const specificationBuilder: PermissionSpecificationBuilder<
         });
       }
     },
+    subjectTypes: [SubjectType.Snap],
   };
 };
 
 export const rpcEndowmentBuilder = Object.freeze({
-  targetKey,
+  targetName,
   specificationBuilder,
 } as const);
 

@@ -1,7 +1,5 @@
-import {
-  PermissionConstraint,
-  PermissionType,
-} from '@metamask/permission-controller';
+import type { PermissionConstraint } from '@metamask/permission-controller';
+import { PermissionType, SubjectType } from '@metamask/permission-controller';
 import { SnapCaveatType } from '@metamask/snaps-utils';
 
 import { SnapEndowments } from '.';
@@ -19,10 +17,11 @@ describe('endowment:transaction-insight', () => {
   it('builds the expected permission specification', () => {
     expect(specification).toStrictEqual({
       permissionType: PermissionType.Endowment,
-      targetKey: SnapEndowments.TransactionInsight,
+      targetName: SnapEndowments.TransactionInsight,
       allowedCaveats: [SnapCaveatType.TransactionOrigin],
       endowmentGetter: expect.any(Function),
       validator: expect.any(Function),
+      subjectTypes: [SubjectType.Snap],
     });
 
     expect(specification.endowmentGetter()).toBeUndefined();
@@ -114,7 +113,7 @@ describe('getTransactionOriginCaveat', () => {
     );
   });
 
-  it('throws if the first caveat is not a "snapKeyring" caveat', () => {
+  it('throws if the first caveat is not a "permittedCoinTypes" caveat', () => {
     const permission: PermissionConstraint = {
       date: 0,
       parentCapability: 'foo',

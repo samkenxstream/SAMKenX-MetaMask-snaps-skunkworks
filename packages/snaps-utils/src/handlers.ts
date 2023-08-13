@@ -1,7 +1,75 @@
-import { Component } from '@metamask/snaps-ui';
-import { Json, JsonRpcRequest } from '@metamask/utils';
+import type { Component } from '@metamask/snaps-ui';
+import type { Json, JsonRpcParams, JsonRpcRequest } from '@metamask/utils';
 
-import { AccountId, ChainId, RequestArguments } from './namespace';
+export enum HandlerType {
+  OnRpcRequest = 'onRpcRequest',
+  OnTransaction = 'onTransaction',
+  OnCronjob = 'onCronjob',
+  OnInstall = 'onInstall',
+  OnUpdate = 'onUpdate',
+}
+
+type SnapHandler = {
+  /**
+   * The type of handler.
+   */
+  type: HandlerType;
+
+  /**
+   * Whether the handler is required, i.e., whether the request will fail if the
+   * handler is called, but the snap does not export it.
+   *
+   * This is primarily used for the lifecycle handlers, which are optional.
+   */
+  required: boolean;
+
+  /**
+   * Validate the given snap export. This should return a type guard for the
+   * handler type.
+   *
+   * @param snapExport - The export to validate.
+   * @returns Whether the export is valid.
+   */
+  validator: (snapExport: unknown) => boolean;
+};
+
+export const SNAP_EXPORTS = {
+  [HandlerType.OnRpcRequest]: {
+    type: HandlerType.OnRpcRequest,
+    required: true,
+    validator: (snapExport: unknown): snapExport is OnRpcRequestHandler => {
+      return typeof snapExport === 'function';
+    },
+  },
+  [HandlerType.OnTransaction]: {
+    type: HandlerType.OnTransaction,
+    required: true,
+    validator: (snapExport: unknown): snapExport is OnTransactionHandler => {
+      return typeof snapExport === 'function';
+    },
+  },
+  [HandlerType.OnCronjob]: {
+    type: HandlerType.OnCronjob,
+    required: true,
+    validator: (snapExport: unknown): snapExport is OnCronjobHandler => {
+      return typeof snapExport === 'function';
+    },
+  },
+  [HandlerType.OnInstall]: {
+    type: HandlerType.OnInstall,
+    required: false,
+    validator: (snapExport: unknown): snapExport is OnInstallHandler => {
+      return typeof snapExport === 'function';
+    },
+  },
+  [HandlerType.OnUpdate]: {
+    type: HandlerType.OnUpdate,
+    required: false,
+    validator: (snapExport: unknown): snapExport is OnUpdateHandler => {
+      return typeof snapExport === 'function';
+    },
+  },
+} as const;
 
 /**
  * The `onRpcRequest` handler. This is called whenever a JSON-RPC request is
@@ -13,23 +81,21 @@ import { AccountId, ChainId, RequestArguments } from './namespace';
  * @param args.request - The JSON-RPC request sent to the snap.
  * @returns The JSON-RPC response. This must be a JSON-serializable value.
  */
-export type OnRpcRequestHandler = (args: {
-  origin: string;
-  request: JsonRpcRequest<Json[] | Record<string, Json>>;
-}) => Promise<unknown>;
+export type OnRpcRequestHandler<Params extends JsonRpcParams = JsonRpcParams> =
+  (args: {
+    origin: string;
+    request: JsonRpcRequest<Params>;
+  }) => Promise<unknown>;
 
 /**
  * The response from a snap's `onTransaction` handler.
  *
- * @property insights - The insights object. This is a key-value map of the
- * insights that the snap has about the transaction. The keys are the insight
- * names, and the values are the insight values. The insight values must be
- * JSON-serializable.
+ * @property content - A custom UI component, that will be shown in MetaMask. Can be created using `@metamask/snaps-ui`.
  *
  * If the snap has no insights about the transaction, this should be `null`.
  */
 export type OnTransactionResponse = {
-  content: Component;
+  content: Component | null;
 };
 
 /**
@@ -59,62 +125,48 @@ export type OnTransactionHandler = (args: {
  * @param args - The request arguments.
  * @param args.request - The JSON-RPC request sent to the snap.
  */
-export type OnCronjobHandler = (args: {
-  request: JsonRpcRequest<Json[] | Record<string, Json>>;
+export type OnCronjobHandler<Params extends JsonRpcParams = JsonRpcParams> =
+  (args: { request: JsonRpcRequest<Params> }) => Promise<unknown>;
+
+/**
+ * A handler that can be used for the lifecycle hooks.
+ */
+export type LifecycleEventHandler = (args: {
+  request: JsonRpcRequest;
 }) => Promise<unknown>;
 
 /**
- * A request sent to the `handleRequest` handler of a snap keyring.
+ * The `onInstall` handler. This is called after the snap is installed.
  *
- * @property chainId - The CAIP-2 chain ID of the network the request is being
- * made to.
- * @property origin - The origin of the request. This can be the ID of another
- * snap, or the URL of a dapp.
+ * This type is an alias for {@link LifecycleEventHandler}.
  */
-export type KeyringRequest = {
-  chainId: ChainId;
-  origin: string;
-};
+export type OnInstallHandler = LifecycleEventHandler;
 
 /**
- * A keyring event, which consists of a {@link KeyringRequest}, combined with
- * the name of the event.
+ * The `onUpdate` handler. This is called after the snap is updated.
+ *
+ * This type is an alias for {@link LifecycleEventHandler}.
  */
-export type KeyringEvent = KeyringRequest & { eventName: string };
+export type OnUpdateHandler = LifecycleEventHandler;
 
 /**
- * A snap keyring object, which can be exported as `keyring` in a snap.
+ * Utility type for getting the handler function type from a handler type.
  */
-// eslint-disable-next-line @typescript-eslint/consistent-type-definitions
-export interface SnapKeyring {
-  getAccounts(): Promise<AccountId[]>;
-  handleRequest(
-    data: KeyringRequest & {
-      request: RequestArguments;
-    },
-  ): Promise<Json>;
-  on(data: KeyringEvent, listener: (...args: Json[]) => void): void;
-  off(data: KeyringEvent): void;
-
-  addAccount?(chainId: ChainId): Promise<AccountId>;
-  removeAccount?(accountId: AccountId): Promise<void>;
-
-  importAccount?(chainId: ChainId, data: Json): Promise<AccountId>;
-  exportAccount?(accountId: AccountId): Promise<Json>;
-}
+export type HandlerFunction<Type extends SnapHandler> =
+  Type['validator'] extends (snapExport: unknown) => snapExport is infer Handler
+    ? Handler
+    : never;
 
 /**
  * All the function-based handlers that a snap can implement.
  */
 export type SnapFunctionExports = {
-  onRpcRequest?: OnRpcRequestHandler;
-  onTransaction?: OnTransactionHandler;
-  onCronjob?: OnCronjobHandler;
+  [Key in keyof typeof SNAP_EXPORTS]?: HandlerFunction<
+    typeof SNAP_EXPORTS[Key]
+  >;
 };
 
 /**
  * All handlers that a snap can implement.
  */
-export type SnapExports = SnapFunctionExports & {
-  keyring?: SnapKeyring;
-};
+export type SnapExports = SnapFunctionExports;

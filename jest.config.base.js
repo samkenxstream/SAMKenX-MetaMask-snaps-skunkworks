@@ -25,8 +25,13 @@ module.exports = {
   collectCoverageFrom: [
     './src/**/*.ts',
     '!./src/**/*.test.ts',
+    '!./src/**/*.test.browser.ts',
     '!./src/test-utils/**/*.ts',
     '!./src/**/*.d.ts',
+    '!./src/**/__test__/**',
+    '!./src/**/__mocks__/**',
+    '!./src/**/__snapshots__/**',
+    '!./src/**/__fixtures__/**',
   ],
 
   // The directory where Jest should output its coverage files
@@ -107,7 +112,7 @@ module.exports = {
   // notifyMode: "failure-change",
 
   // A preset that is used as a base for Jest's configuration
-  preset: 'ts-jest',
+  // preset: '',
 
   // Run tests from one or more projects
   // projects: undefined,
@@ -180,9 +185,6 @@ module.exports = {
   // This option allows use of a custom test runner
   // testRunner: "jest-circus/runner",
 
-  // Reduce the default test timeout from 5s to 2.5s
-  testTimeout: 2500,
-
   // This option sets the URL for the jsdom environment. It is reflected in properties such as location.href
   // testURL: "http://localhost",
 
@@ -190,7 +192,20 @@ module.exports = {
   // timers: "real",
 
   // A map from regular expressions to paths to transformers
-  // transform: undefined,
+  transform: {
+    '^.+\\.(t|j)sx?$': [
+      '@swc/jest',
+      {
+        jsc: {
+          target: 'es2022',
+          parser: {
+            syntax: 'typescript',
+          },
+        },
+        sourceMaps: false,
+      },
+    ],
+  },
 
   // An array of regexp pattern strings that are matched against all source file paths, matched files will skip transformation
   // transformIgnorePatterns: [

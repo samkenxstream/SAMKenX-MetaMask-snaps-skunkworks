@@ -1,9 +1,9 @@
-import {
+import type {
   EndowmentGetterParams,
   PermissionSpecificationBuilder,
-  PermissionType,
   ValidPermissionSpecification,
 } from '@metamask/permission-controller';
+import { PermissionType, SubjectType } from '@metamask/permission-controller';
 
 import { SnapEndowments } from './enum';
 
@@ -11,7 +11,7 @@ const permissionName = SnapEndowments.WebAssemblyAccess;
 
 type WebAssemblyEndowmentSpecification = ValidPermissionSpecification<{
   permissionType: PermissionType.Endowment;
-  targetKey: typeof permissionName;
+  targetName: typeof permissionName;
   endowmentGetter: (_options?: any) => ['WebAssembly'];
   allowedCaveats: null;
 }>;
@@ -32,15 +32,16 @@ const specificationBuilder: PermissionSpecificationBuilder<
 > = (_builderOptions?: any) => {
   return {
     permissionType: PermissionType.Endowment,
-    targetKey: permissionName,
+    targetName: permissionName,
     allowedCaveats: null,
     endowmentGetter: (_getterOptions?: EndowmentGetterParams) => {
       return ['WebAssembly'];
     },
+    subjectTypes: [SubjectType.Snap],
   };
 };
 
 export const webAssemblyEndowmentBuilder = Object.freeze({
-  targetKey: permissionName,
+  targetName: permissionName,
   specificationBuilder,
 } as const);

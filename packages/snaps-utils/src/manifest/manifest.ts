@@ -1,4 +1,5 @@
-import { Json, assertExhaustive, assert, isPlainObject } from '@metamask/utils';
+import type { Json } from '@metamask/utils';
+import { assertExhaustive, assert, isPlainObject } from '@metamask/utils';
 import deepEqual from 'fast-deep-equal';
 import { promises as fs } from 'fs';
 import pathUtils from 'path';
@@ -11,23 +12,20 @@ import {
   ProgrammaticallyFixableSnapError,
   validateSnapShasum,
 } from '../snaps';
-import {
-  NpmSnapFileNames,
-  SnapFiles,
-  SnapValidationFailureReason,
-  UnvalidatedSnapFiles,
-} from '../types';
+import type { SnapFiles, UnvalidatedSnapFiles } from '../types';
+import { NpmSnapFileNames, SnapValidationFailureReason } from '../types';
 import { readVirtualFile, VirtualFile } from '../virtual-file';
-import { SnapManifest } from './validation';
+import type { SnapManifest } from './validation';
 
 const MANIFEST_SORT_ORDER: Record<keyof SnapManifest, number> = {
-  version: 1,
-  description: 2,
-  proposedName: 3,
-  repository: 4,
-  source: 5,
-  initialPermissions: 6,
-  manifestVersion: 7,
+  $schema: 1,
+  version: 2,
+  description: 3,
+  proposedName: 4,
+  repository: 5,
+  source: 6,
+  initialPermissions: 7,
+  manifestVersion: 8,
 };
 
 /**
@@ -51,6 +49,8 @@ export type CheckManifestResult = {
   errors: string[];
 };
 
+export type WriteFileFunction = (path: string, data: string) => Promise<void>;
+
 /**
  * Validates a snap.manifest.json file. Attempts to fix the manifest and write
  * the fixed version to disk if `writeManifest` is true. Throws if validation
@@ -59,6 +59,7 @@ export type CheckManifestResult = {
  * @param basePath - The path to the folder with the manifest files.
  * @param writeManifest - Whether to write the fixed manifest to disk.
  * @param sourceCode - The source code of the Snap.
+ * @param writeFileFn - The function to use to write the manifest to disk.
  * @returns Whether the manifest was updated, and an array of warnings that
  * were encountered during processing of the manifest files.
  */
@@ -66,6 +67,7 @@ export async function checkManifest(
   basePath: string,
   writeManifest = true,
   sourceCode?: string,
+  writeFileFn: WriteFileFunction = fs.writeFile,
 ): Promise<CheckManifestResult> {
   const warnings: string[] = [];
   const errors: string[] = [];
@@ -178,7 +180,7 @@ export async function checkManifest(
       )}\n`;
 
       if (updated || newManifest !== manifestFile.value) {
-        await fs.writeFile(
+        await writeFileFn(
           pathUtils.join(basePath, NpmSnapFileNames.Manifest),
           newManifest,
         );
@@ -278,7 +280,7 @@ export async function getSnapSourceCode(
     );
     return virtualFile;
   } catch (error) {
-    throw new Error(`Failed to read Snap bundle file: ${error.message}`);
+    throw new Error(`Failed to read snap bundle file: ${error.message}`);
   }
 }
 
@@ -312,7 +314,7 @@ export async function getSnapIcon(
     );
     return virtualFile;
   } catch (error) {
-    throw new Error(`Failed to read Snap icon file: ${error.message}`);
+    throw new Error(`Failed to read snap icon file: ${error.message}`);
   }
 }
 

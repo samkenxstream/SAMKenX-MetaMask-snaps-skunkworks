@@ -11,13 +11,15 @@ import {
   DEFAULT_SNAP_BUNDLE,
   getSnapManifest,
 } from '@metamask/snaps-utils/test-utils';
-import browserify, { Options as BrowserifyOptions } from 'browserify';
+import type { Options as BrowserifyOptions } from 'browserify';
+import browserify from 'browserify';
 import concat from 'concat-stream';
 import os from 'os';
 import pathUtils from 'path';
 import { Readable } from 'stream';
 
-import plugin, { Options, SnapsBrowserifyTransform } from './plugin';
+import type { Options } from './plugin';
+import plugin, { SnapsBrowserifyTransform } from './plugin';
 
 jest.mock('fs');
 
@@ -228,7 +230,7 @@ describe('plugin', () => {
 
   it('forwards errors', async () => {
     const mock = evalBundle as jest.MockedFunction<typeof evalBundle>;
-    mock.mockRejectedValue('foo');
+    mock.mockRejectedValue(new Error('foo'));
 
     const value = toStream(DEFAULT_SNAP_BUNDLE);
 
@@ -247,6 +249,6 @@ describe('plugin', () => {
       });
     });
 
-    expect(error.message).toBe('Snap evaluation error: foo');
+    expect(error.message).toBe('foo');
   });
 });

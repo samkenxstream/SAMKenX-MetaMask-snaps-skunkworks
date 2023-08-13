@@ -6,49 +6,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.30.0]
+## [0.37.3-flask.1]
 ### Changed
-- No changes this release.
+- Bump `semver` to `^7.5.4` ([#1631](https://github.com/MetaMask/snaps/pull/1631))
 
-## [0.29.0]
+## [0.37.2-flask.1]
 ### Changed
-- No changes this release.
+- Release package independently ([#1600](https://github.com/MetaMask/snaps/pull/1600))
+  - The version of the package no longer needs to match the version of all other
+    MetaMask Snaps packages.
 
-## [0.28.0]
-### Changed
-- No changes this release.
-
-## [0.27.1]
-### Changed
-- No changes this release.
-
-## [0.27.0]
-### Changed
-- No changes this release.
-
-## [0.26.2]
-### Changed
-- No changes this release.
-
-## [0.26.1]
-### Changed
-- No changes this release.
-
-## [0.26.0]
-### Removed
-- **BREAKING:** Remove spacer component ([#1031](https://github.com/MetaMask/snaps-monorepo/pull/1031))
-
-## [0.25.0]
-### Added
-- Initial release ([#978](https://github.com/MetaMask/snaps-monorepo/pull/978), [#1009](https://github.com/MetaMask/snaps-monorepo/pull/1009))
-
-[Unreleased]: https://github.com/MetaMask/snaps-monorepo/compare/v0.30.0...HEAD
-[0.30.0]: https://github.com/MetaMask/snaps-monorepo/compare/v0.29.0...v0.30.0
-[0.29.0]: https://github.com/MetaMask/snaps-monorepo/compare/v0.28.0...v0.29.0
-[0.28.0]: https://github.com/MetaMask/snaps-monorepo/compare/v0.27.1...v0.28.0
-[0.27.1]: https://github.com/MetaMask/snaps-monorepo/compare/v0.27.0...v0.27.1
-[0.27.0]: https://github.com/MetaMask/snaps-monorepo/compare/v0.26.2...v0.27.0
-[0.26.2]: https://github.com/MetaMask/snaps-monorepo/compare/v0.26.1...v0.26.2
-[0.26.1]: https://github.com/MetaMask/snaps-monorepo/compare/v0.26.0...v0.26.1
-[0.26.0]: https://github.com/MetaMask/snaps-monorepo/compare/v0.25.0...v0.26.0
-[0.25.0]: https://github.com/MetaMask/snaps-monorepo/releases/tag/v0.25.0
+[Unreleased]: https://github.com/MetaMask/snaps/compare/@metamask/snaps-ui@0.37.3-flask.1...HEAD
+[0.37.3-flask.1]: https://github.com/MetaMask/snaps/compare/@metamask/snaps-ui@0.37.2-flask.1...@metamask/snaps-ui@0.37.3-flask.1
+[0.37.2-flask.1]: https://github.com/MetaMask/snaps/releases/tag/@metamask/snaps-ui@0.37.2-flask.1

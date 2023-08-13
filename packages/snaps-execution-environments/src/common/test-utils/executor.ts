@@ -1,5 +1,6 @@
-import { Json, JsonRpcRequest, JsonRpcResponse } from '@metamask/utils';
-import { Duplex, DuplexOptions, Readable } from 'stream';
+import type { Json, JsonRpcRequest, JsonRpcResponse } from '@metamask/utils';
+import type { DuplexOptions, Readable } from 'stream';
+import { Duplex } from 'stream';
 
 import { BaseSnapExecutor } from '../BaseSnapExecutor';
 
@@ -97,6 +98,10 @@ export class TestSnapExecutor extends BaseSnapExecutor {
       this.#rpcBuffer.push(chunk);
       TestSnapExecutor.#flushReads(this.#rpcBuffer, this.#rpcListeners);
     });
+  }
+
+  get commandBuffer() {
+    return this.#commandBuffer;
   }
 
   // Utility function for executing snaps

@@ -15,34 +15,16 @@ module.exports = {
     },
 
     {
-      files: ['src/**/*', 'scripts/**/*'],
-      rules: {
-        'node/no-process-exit': 'off',
-      },
-    },
-
-    {
       files: ['src/main.ts'],
       rules: {
-        'node/shebang': 'off',
+        'n/shebang': 'off',
       },
     },
 
     {
-      files: [
-        // Exports a yargs middleware function, which must be synchronous.
-        'src/utils/snap-config.ts',
-        'src/utils/snap-config.test.ts',
-      ],
+      files: ['**/*.e2e.test.ts'],
       rules: {
-        'node/no-sync': 'off',
-      },
-    },
-
-    {
-      files: ['**/*.test.ts'],
-      rules: {
-        'node/no-callback-literal': 'off',
+        'jest/expect-expect': 'off',
       },
     },
   ],

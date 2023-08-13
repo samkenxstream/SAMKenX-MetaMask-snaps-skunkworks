@@ -1,48 +1,56 @@
 // eslint-disable-next-line @typescript-eslint/triple-slash-reference, spaced-comment
 /// <reference path="../../../../node_modules/ses/index.d.ts" />
 import { StreamProvider } from '@metamask/providers';
-import { RequestArguments } from '@metamask/providers/dist/BaseProvider';
-import { SnapsGlobalObject } from '@metamask/rpc-methods';
-import {
+import type { RequestArguments } from '@metamask/providers/dist/BaseProvider';
+import type { SnapsGlobalObject } from '@metamask/rpc-methods';
+import type {
   SnapExports,
   HandlerType,
   SnapExportsParameters,
-  SNAP_EXPORT_NAMES,
-  logError,
 } from '@metamask/snaps-utils';
 import {
-  isObject,
-  isValidJson,
+  SNAP_EXPORT_NAMES,
+  logError,
+  SNAP_EXPORTS,
+} from '@metamask/snaps-utils';
+import type {
   JsonRpcNotification,
-  assert,
-  isJsonRpcRequest,
   JsonRpcId,
   JsonRpcRequest,
   Json,
+} from '@metamask/utils';
+import {
+  isObject,
+  isValidJson,
+  assert,
+  isJsonRpcRequest,
   hasProperty,
+  getSafeJson,
 } from '@metamask/utils';
 import { errorCodes, ethErrors, serializeError } from 'eth-rpc-errors';
 import { createIdRemapMiddleware } from 'json-rpc-engine';
-import { Duplex } from 'stream';
+import type { Duplex } from 'stream';
 import { validate } from 'superstruct';
 
 import { log } from '../logging';
 import EEOpenRPCDocument from '../openrpc.json';
-import {
-  CommandMethodsMapping,
-  getCommandMethodImplementations,
-} from './commands';
+import type { CommandMethodsMapping } from './commands';
+import { getCommandMethodImplementations } from './commands';
 import { createEndowments } from './endowments';
 import { addEventListener, removeEventListener } from './globalEvents';
-import { wrapKeyring } from './keyring';
 import { sortParamKeys } from './sortParams';
-import { constructError, proxyStreamProvider, withTeardown } from './utils';
+import {
+  assertEthereumOutboundRequest,
+  assertSnapOutboundRequest,
+  constructError,
+  proxyStreamProvider,
+  withTeardown,
+} from './utils';
 import {
   ExecuteSnapRequestArgumentsStruct,
   PingRequestArgumentsStruct,
   SnapRpcRequestArgumentsStruct,
   TerminateRequestArgumentsStruct,
-  validateExport,
 } from './validation';
 
 type EvaluationData = {
@@ -60,8 +68,6 @@ const fallbackError = {
   message: 'Execution Environment Error',
 };
 
-// TODO: `KeyringParameters` expects a `chainId` for certain methods, but we're
-// not providing it in `getHandlerArguments`, resulting in type errors.
 export type InvokeSnapArgs = Omit<SnapExportsParameters[0], 'chainId'>;
 
 export type InvokeSnap = (
@@ -82,7 +88,7 @@ const EXECUTION_ENVIRONMENT_METHODS = {
   },
   executeSnap: {
     struct: ExecuteSnapRequestArgumentsStruct,
-    params: ['snapName', 'sourceCode', 'endowments'],
+    params: ['snapId', 'sourceCode', 'endowments'],
   },
   terminate: {
     struct: TerminateRequestArgumentsStruct,
@@ -93,6 +99,8 @@ const EXECUTION_ENVIRONMENT_METHODS = {
     params: ['target', 'handler', 'origin', 'request'],
   },
 };
+
+type Methods = typeof EXECUTION_ENVIRONMENT_METHODS;
 
 export class BaseSnapExecutor {
   private readonly snapData: Map<string, SnapData>;
@@ -122,17 +130,24 @@ export class BaseSnapExecutor {
 
     this.methods = getCommandMethodImplementations(
       this.startSnap.bind(this),
-      async (target, handlerName, args) => {
+      async (target, handlerType, args) => {
         const data = this.snapData.get(target);
-        // We're capturing the handler in case someone modifies the data object before the call
-        const handler =
-          handlerName === HandlerType.SnapKeyring
-            ? wrapKeyring(this.notify.bind(this), data?.exports.keyring)
-            : data?.exports[handlerName];
+        // We're capturing the handler in case someone modifies the data object
+        // before the call.
+        const handler = data?.exports[handlerType];
+        const { required } = SNAP_EXPORTS[handlerType];
+
         assert(
-          handler !== undefined,
-          `No ${handlerName} handler exported for snap "${target}`,
+          !required || handler !== undefined,
+          `No ${handlerType} handler exported for snap "${target}`,
         );
+
+        // Certain handlers are not required. If they are not exported, we
+        // return null.
+        if (!handler) {
+          return null;
+        }
+
         // TODO: fix handler args type cast
         let result = await this.executeInSnapContext(target, () =>
           handler(args as any),
@@ -143,11 +158,17 @@ export class BaseSnapExecutor {
           result = null;
         }
 
-        assert(
-          isValidJson(result),
-          new TypeError('Received non-JSON-serializable value.'),
-        );
-        return result;
+        // /!\ Always return only sanitized JSON to prevent security flaws. /!\
+        try {
+          return getSafeJson(result);
+        } catch (error) {
+          throw new TypeError(
+            `Received non-JSON-serializable value: ${error.message.replace(
+              /^Assertion failed: /u,
+              '',
+            )}`,
+          );
+        }
       },
       this.onTerminate.bind(this),
     );
@@ -200,10 +221,7 @@ export class BaseSnapExecutor {
       return;
     }
 
-    const methodObject =
-      EXECUTION_ENVIRONMENT_METHODS[
-        method as keyof typeof EXECUTION_ENVIRONMENT_METHODS
-      ];
+    const methodObject = EXECUTION_ENVIRONMENT_METHODS[method as keyof Methods];
 
     // support params by-name and by-position
     const paramsAsArray = sortParamKeys(methodObject.params, params);
@@ -265,16 +283,16 @@ export class BaseSnapExecutor {
    * Attempts to evaluate a snap in SES. Generates APIs for the snap. May throw
    * on errors.
    *
-   * @param snapName - The name of the snap.
+   * @param snapId - The id of the snap.
    * @param sourceCode - The source code of the snap, in IIFE format.
    * @param _endowments - An array of the names of the endowments.
    */
   protected async startSnap(
-    snapName: string,
+    snapId: string,
     sourceCode: string,
     _endowments?: string[],
   ): Promise<void> {
-    log(`Starting snap '${snapName}' in worker.`);
+    log(`Starting snap '${snapId}' in worker.`);
     if (this.snapPromiseErrorHandler) {
       removeEventListener('unhandledrejection', this.snapPromiseErrorHandler);
     }
@@ -284,12 +302,12 @@ export class BaseSnapExecutor {
     }
 
     this.snapErrorHandler = (error: ErrorEvent) => {
-      this.errorHandler(error.error, { snapName });
+      this.errorHandler(error.error, { snapId });
     };
 
     this.snapPromiseErrorHandler = (error: PromiseRejectionEvent) => {
       this.errorHandler(error instanceof Error ? error : error.reason, {
-        snapName,
+        snapId,
       });
     };
 
@@ -309,12 +327,13 @@ export class BaseSnapExecutor {
       const { endowments, teardown: endowmentTeardown } = createEndowments(
         snap,
         ethereum,
+        snapId,
         _endowments,
       );
 
       // !!! Ensure that this is the only place the data is being set.
       // Other methods access the object value and mutate its properties.
-      this.snapData.set(snapName, {
+      this.snapData.set(snapId, {
         idleTeardown: endowmentTeardown,
         runningEvaluations: new Set(),
         exports: {},
@@ -337,14 +356,14 @@ export class BaseSnapExecutor {
       compartment.globalThis.global = compartment.globalThis;
       compartment.globalThis.window = compartment.globalThis;
 
-      await this.executeInSnapContext(snapName, () => {
+      await this.executeInSnapContext(snapId, () => {
         compartment.evaluate(sourceCode);
-        this.registerSnapExports(snapName, snapModule);
+        this.registerSnapExports(snapId, snapModule);
       });
     } catch (error) {
-      this.removeSnap(snapName);
+      this.removeSnap(snapId);
       throw new Error(
-        `Error while running snap '${snapName}': ${(error as Error).message}`,
+        `Error while running snap '${snapId}': ${(error as Error).message}`,
       );
     }
   }
@@ -363,16 +382,17 @@ export class BaseSnapExecutor {
     this.snapData.clear();
   }
 
-  private registerSnapExports(snapName: string, snapModule: any) {
-    const data = this.snapData.get(snapName);
-    // Somebody deleted the Snap before we could register
+  private registerSnapExports(snapId: string, snapModule: any) {
+    const data = this.snapData.get(snapId);
+    // Somebody deleted the snap before we could register.
     if (!data) {
       return;
     }
 
     data.exports = SNAP_EXPORT_NAMES.reduce((acc, exportName) => {
       const snapExport = snapModule.exports[exportName];
-      if (validateExport(exportName, snapExport)) {
+      const { validator } = SNAP_EXPORTS[exportName];
+      if (validator(snapExport)) {
         return { ...acc, [exportName]: snapExport };
       }
       return acc;
@@ -389,14 +409,14 @@ export class BaseSnapExecutor {
     const originalRequest = provider.request.bind(provider);
 
     const request = async (args: RequestArguments) => {
-      assert(
-        String.prototype.startsWith.call(args.method, 'wallet_') ||
-          String.prototype.startsWith.call(args.method, 'snap_'),
-        'The global Snap API only allows RPC methods starting with `wallet_*` and `snap_*`.',
-      );
+      assertSnapOutboundRequest(args);
+      const sanitizedArgs = getSafeJson(args);
       this.notify({ method: 'OutboundRequest' });
       try {
-        return await withTeardown(originalRequest(args), this as any);
+        return await withTeardown(
+          originalRequest(sanitizedArgs as unknown as RequestArguments),
+          this as any,
+        );
       } finally {
         this.notify({ method: 'OutboundResponse' });
       }
@@ -433,17 +453,14 @@ export class BaseSnapExecutor {
     const originalRequest = provider.request.bind(provider);
 
     const request = async (args: RequestArguments) => {
-      assert(
-        !String.prototype.startsWith.call(args.method, 'snap_'),
-        ethErrors.rpc.methodNotFound({
-          data: {
-            method: args.method,
-          },
-        }),
-      );
+      assertEthereumOutboundRequest(args);
+      const sanitizedArgs = getSafeJson(args);
       this.notify({ method: 'OutboundRequest' });
       try {
-        return await withTeardown(originalRequest(args), this as any);
+        return await withTeardown(
+          originalRequest(sanitizedArgs as unknown as RequestArguments),
+          this as any,
+        );
       } finally {
         this.notify({ method: 'OutboundResponse' });
       }
@@ -457,10 +474,10 @@ export class BaseSnapExecutor {
   /**
    * Removes the snap with the given name.
    *
-   * @param snapName - The name of the snap to remove.
+   * @param snapId - The id of the snap to remove.
    */
-  private removeSnap(snapName: string): void {
-    this.snapData.delete(snapName);
+  private removeSnap(snapId: string): void {
+    this.snapData.delete(snapId);
   }
 
   /**
@@ -469,19 +486,19 @@ export class BaseSnapExecutor {
    * counted as an evaluation of the specified snap. When the count of running
    * evaluations of a snap reaches zero, its endowments are torn down.
    *
-   * @param snapName - The name of the snap whose context to execute in.
+   * @param snapId - The id of the snap whose context to execute in.
    * @param executor - The function that will be executed in the snap's context.
    * @returns The executor's return value.
    * @template Result - The return value of the executor.
    */
   private async executeInSnapContext<Result>(
-    snapName: string,
+    snapId: string,
     executor: () => Promise<Result> | Result,
   ): Promise<Result> {
-    const data = this.snapData.get(snapName);
+    const data = this.snapData.get(snapId);
     if (data === undefined) {
       throw new Error(
-        `Tried to execute in context of unknown snap: "${snapName}".`,
+        `Tried to execute in context of unknown snap: "${snapId}".`,
       );
     }
 
@@ -492,7 +509,7 @@ export class BaseSnapExecutor {
           reject(
             // TODO(rekmarks): Specify / standardize error code for this case.
             ethErrors.rpc.internal(
-              `The snap "${snapName}" has been terminated during execution.`,
+              `The snap "${snapId}" has been terminated during execution.`,
             ),
           )),
     );

@@ -1,17 +1,13 @@
-import { PermissionType } from '@metamask/permission-controller';
+import { PermissionType, SubjectType } from '@metamask/permission-controller';
 import { heading, panel, text } from '@metamask/snaps-ui';
 
-import {
-  dialogBuilder,
-  DialogType,
-  DialogMethodHooks,
-  getDialogImplementation,
-} from './dialog';
+import type { DialogMethodHooks } from './dialog';
+import { dialogBuilder, DialogType, getDialogImplementation } from './dialog';
 
 describe('builder', () => {
   it('has the expected shape', () => {
     expect(dialogBuilder).toMatchObject({
-      targetKey: 'snap_dialog',
+      targetName: 'snap_dialog',
       specificationBuilder: expect.any(Function),
       methodHooks: {
         showDialog: true,
@@ -26,11 +22,12 @@ describe('builder', () => {
           showDialog: jest.fn(),
         },
       }),
-    ).toMatchObject({
+    ).toStrictEqual({
       permissionType: PermissionType.RestrictedMethod,
-      targetKey: 'snap_dialog',
+      targetName: 'snap_dialog',
       allowedCaveats: null,
       methodImplementation: expect.any(Function),
+      subjectTypes: [SubjectType.Snap],
     });
   });
 });

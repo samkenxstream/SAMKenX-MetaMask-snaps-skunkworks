@@ -1,20 +1,15 @@
-import {
+import type {
   Caveat,
   SubjectPermissions,
   PermissionConstraint,
 } from '@metamask/permission-controller';
-import { BlockReason } from '@metamask/snaps-registry';
-import {
-  assert,
-  Json,
-  SemVerVersion,
-  isObject,
-  Opaque,
-  assertStruct,
-} from '@metamask/utils';
+import type { BlockReason } from '@metamask/snaps-registry';
+import type { Json, SemVerVersion, Opaque } from '@metamask/utils';
+import { assert, isObject, assertStruct } from '@metamask/utils';
 import { base64 } from '@scure/base';
-import { SerializedEthereumRpcError } from 'eth-rpc-errors/dist/classes';
+import type { SerializedEthereumRpcError } from 'eth-rpc-errors/dist/classes';
 import stableStringify from 'fast-json-stable-stringify';
+import type { Struct } from 'superstruct';
 import {
   empty,
   enums,
@@ -23,7 +18,6 @@ import {
   pattern,
   refine,
   string,
-  Struct,
   union,
   validate,
 } from 'superstruct';
@@ -31,16 +25,10 @@ import validateNPMPackage from 'validate-npm-package-name';
 
 import { SnapCaveatType } from './caveats';
 import { checksumFiles } from './checksum';
-import { SnapManifest, SnapPermissions } from './manifest/validation';
-import {
-  SnapFiles,
-  SnapId,
-  SnapIdPrefixes,
-  SnapsPermissionRequest,
-  SnapValidationFailureReason,
-  uri,
-} from './types';
-import { VirtualFile } from './virtual-file';
+import type { SnapManifest, SnapPermissions } from './manifest/validation';
+import type { SnapFiles, SnapId, SnapsPermissionRequest } from './types';
+import { SnapIdPrefixes, SnapValidationFailureReason, uri } from './types';
+import type { VirtualFile } from './virtual-file';
 
 // This RegEx matches valid npm package names (with some exceptions) and space-
 // separated alphanumerical words, optionally with dashes and underscores.
@@ -78,7 +66,7 @@ export enum SnapStatusEvents {
   Update = 'UPDATE',
 }
 
-export type StatusContext = { snapId: string };
+export type StatusContext = { snapId: ValidatedSnapId };
 export type StatusEvents = { type: SnapStatusEvents };
 export type StatusStates = {
   value: SnapStatus;
@@ -93,12 +81,7 @@ export type VersionHistory = {
   date: number;
 };
 
-export type PersistedSnap = Snap & {
-  /**
-   * The source code of the Snap.
-   */
-  sourceCode: string;
-};
+export type PersistedSnap = Snap;
 
 /**
  * A Snap as it exists in {@link SnapController} state.
@@ -112,13 +95,18 @@ export type Snap = {
   /**
    * The ID of the Snap.
    */
-  id: SnapId;
+  id: ValidatedSnapId;
 
   /**
    * The initial permissions of the Snap, which will be requested when it is
    * installed.
    */
   initialPermissions: SnapPermissions;
+
+  /**
+   * The source code of the Snap.
+   */
+  sourceCode: string;
 
   /**
    * The Snap's manifest file.
@@ -314,6 +302,16 @@ export function getSnapPrefix(snapId: string): SnapIdPrefixes {
     return prefix;
   }
   throw new Error(`Invalid or no prefix found for "${snapId}"`);
+}
+
+/**
+ * Strips snap prefix from a full snap ID.
+ *
+ * @param snapId - The snap ID to strip.
+ * @returns The stripped snap ID.
+ */
+export function stripSnapPrefix(snapId: string): string {
+  return snapId.replace(getSnapPrefix(snapId), '');
 }
 
 /**

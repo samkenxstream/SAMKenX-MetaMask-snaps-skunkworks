@@ -1,9 +1,15 @@
-import { InstallSnapsResult } from '@metamask/snaps-utils';
-import {
+import type { InstallSnapsResult } from '@metamask/snaps-utils';
+import type {
   PermittedHandlerExport,
   PendingJsonRpcResponse,
   JsonRpcEngineEndCallback,
 } from '@metamask/types';
+
+import type { MethodHooksObject } from '../utils';
+
+const hookNames: MethodHooksObject<GetSnapsHooks> = {
+  getSnaps: true,
+};
 
 /**
  * `wallet_getSnaps` gets the requester's permitted and installed Snaps.
@@ -15,9 +21,7 @@ export const getSnapsHandler: PermittedHandlerExport<
 > = {
   methodNames: ['wallet_getSnaps'],
   implementation: getSnapsImplementation,
-  hookNames: {
-    getSnaps: true,
-  },
+  hookNames,
 };
 
 export type GetSnapsHooks = {

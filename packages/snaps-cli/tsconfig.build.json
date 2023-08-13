@@ -2,7 +2,7 @@
   "extends": "../../tsconfig.packages.build.json",
   "compilerOptions": {
     "baseUrl": "./",
-    "outDir": "./dist",
+    "outDir": "./dist/types",
     "rootDir": "./src"
   },
   "include": ["./src"],
@@ -14,6 +14,7 @@
   ],
   "references": [
     { "path": "../snaps-utils/tsconfig.build.json" },
-    { "path": "../snaps-browserify-plugin/tsconfig.build.json" }
+    { "path": "../snaps-browserify-plugin/tsconfig.build.json" },
+    { "path": "../snaps-webpack-plugin/tsconfig.build.json" }
   ]
 }

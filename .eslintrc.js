@@ -37,6 +37,10 @@ module.exports = {
       files: ['**/*.js'],
       extends: ['@metamask/eslint-config-nodejs'],
 
+      parserOptions: {
+        ecmaVersion: 2020,
+      },
+
       rules: {
         // This prevents using Node.js and/or browser specific globals. We
         // currently use both in our codebase, so this rule is disabled.
@@ -45,7 +49,7 @@ module.exports = {
     },
 
     {
-      files: ['**/*.ts'],
+      files: ['**/*.ts', '**/*.tsx'],
       extends: ['@metamask/eslint-config-typescript'],
       rules: {
         // This rule disallows the `private` modifier on class fields, but we
@@ -80,5 +84,10 @@ module.exports = {
     },
   ],
 
-  ignorePatterns: ['!.prettierrc.js', '**/!.eslintrc.js', '**/dist*/'],
+  ignorePatterns: [
+    '!.prettierrc.js',
+    '**/!.eslintrc.js',
+    '**/dist*/',
+    'packages/**',
+  ],
 };

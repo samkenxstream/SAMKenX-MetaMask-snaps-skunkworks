@@ -1,7 +1,8 @@
-import { HandlerType, SnapId } from '@metamask/snaps-utils';
+import type { SnapId } from '@metamask/snaps-utils';
+import { HandlerType } from '@metamask/snaps-utils';
 
 import { createService, MOCK_BLOCK_NUMBER } from '../../test-utils';
-import { SnapErrorJson } from '../ExecutionService';
+import type { SnapErrorJson } from '../ExecutionService';
 import { NodeProcessExecutionService } from './NodeProcessExecutionService';
 
 const ON_RPC_REQUEST = HandlerType.OnRpcRequest;
@@ -124,7 +125,7 @@ describe('NodeProcessExecutionService', () => {
     expect(await unhandledErrorPromise).toEqual({
       code: -32603,
       data: {
-        snapName: 'TestSnap',
+        snapId: 'TestSnap',
         stack: expect.any(String),
       },
       message: 'random error inside',

@@ -1,4 +1,7 @@
-import { StreamProvider } from '@metamask/providers';
+import type { StreamProvider } from '@metamask/providers';
+import type { RequestArguments } from '@metamask/providers/dist/BaseProvider';
+import { assert, assertStruct, JsonStruct } from '@metamask/utils';
+import { ethErrors } from 'eth-rpc-errors';
 
 import { log } from '../logging';
 
@@ -32,12 +35,12 @@ export function constructError(originalError: unknown) {
  * @param teardownRef.lastTeardown - Number of the last teardown.
  * @returns New proxy promise.
  */
-export async function withTeardown<T>(
-  originalPromise: Promise<T>,
+export async function withTeardown<Type>(
+  originalPromise: Promise<Type>,
   teardownRef: { lastTeardown: number },
-): Promise<T> {
+): Promise<Type> {
   const myTeardown = teardownRef.lastTeardown;
-  return new Promise<T>((resolve, reject) => {
+  return new Promise<Type>((resolve, reject) => {
     originalPromise
       .then((value) => {
         if (teardownRef.lastTeardown === myTeardown) {
@@ -96,4 +99,74 @@ export function proxyStreamProvider(
   );
 
   return proxy as StreamProvider;
+}
+
+// We're blocking these RPC methods for v1, will revisit later.
+export const BLOCKED_RPC_METHODS = Object.freeze([
+  'wallet_requestSnaps',
+  'wallet_requestPermissions',
+  // We disallow all of these confirmations for now, since the screens are not ready for Snaps.
+  'eth_sendRawTransaction',
+  'eth_sendTransaction',
+  'eth_sign',
+  'eth_signTypedData',
+  'eth_signTypedData_v1',
+  'eth_signTypedData_v3',
+  'eth_signTypedData_v4',
+  'eth_decrypt',
+  'eth_getEncryptionPublicKey',
+  'wallet_addEthereumChain',
+  'wallet_switchEthereumChain',
+  'wallet_watchAsset',
+  'wallet_registerOnboarding',
+  'wallet_scanQRCode',
+]);
+
+/**
+ * Asserts the validity of request arguments for a snap outbound request using the `snap.request` API.
+ *
+ * @param args - The arguments to validate.
+ */
+export function assertSnapOutboundRequest(args: RequestArguments) {
+  // Disallow any non `wallet_` or `snap_` methods for separation of concerns.
+  assert(
+    String.prototype.startsWith.call(args.method, 'wallet_') ||
+      String.prototype.startsWith.call(args.method, 'snap_'),
+    'The global Snap API only allows RPC methods starting with `wallet_*` and `snap_*`.',
+  );
+  assert(
+    !BLOCKED_RPC_METHODS.includes(args.method),
+    ethErrors.rpc.methodNotFound({
+      data: {
+        method: args.method,
+      },
+    }),
+  );
+  assertStruct(args, JsonStruct, 'Provided value is not JSON-RPC compatible');
+}
+
+/**
+ * Asserts the validity of request arguments for an ethereum outbound request using the `ethereum.request` API.
+ *
+ * @param args - The arguments to validate.
+ */
+export function assertEthereumOutboundRequest(args: RequestArguments) {
+  // Disallow snaps methods for separation of concerns.
+  assert(
+    !String.prototype.startsWith.call(args.method, 'snap_'),
+    ethErrors.rpc.methodNotFound({
+      data: {
+        method: args.method,
+      },
+    }),
+  );
+  assert(
+    !BLOCKED_RPC_METHODS.includes(args.method),
+    ethErrors.rpc.methodNotFound({
+      data: {
+        method: args.method,
+      },
+    }),
+  );
+  assertStruct(args, JsonStruct, 'Provided value is not JSON-RPC compatible');
 }

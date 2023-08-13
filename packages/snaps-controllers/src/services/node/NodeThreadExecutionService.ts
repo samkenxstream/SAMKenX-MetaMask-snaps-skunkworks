@@ -1,11 +1,10 @@
-import {
-  ThreadParentMessageStream,
-  BasePostMessageStream,
-} from '@metamask/post-message-stream';
+import type { BasePostMessageStream } from '@metamask/post-message-stream';
+import { ThreadParentMessageStream } from '@metamask/post-message-stream';
 // eslint-disable-next-line @typescript-eslint/no-shadow
 import { Worker } from 'worker_threads';
 
-import { AbstractExecutionService, Job } from '..';
+import type { Job } from '..';
+import { AbstractExecutionService } from '..';
 
 export class NodeThreadExecutionService extends AbstractExecutionService<Worker> {
   protected async initEnvStream(): Promise<{
@@ -14,7 +13,7 @@ export class NodeThreadExecutionService extends AbstractExecutionService<Worker>
   }> {
     const worker = new Worker(
       require.resolve(
-        '@metamask/snaps-execution-environments/dist/webpack/node-thread/bundle.js',
+        '@metamask/snaps-execution-environments/dist/browserify/node-thread/bundle.js',
       ),
     );
     const stream = new ThreadParentMessageStream({ thread: worker });
